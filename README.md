@@ -7,10 +7,14 @@ Todo o processamento será feito no computador: o Ollama executa os modelos, o C
 ## Requisitos
 
 - Windows com PowerShell;
-- Python 3.11 ou superior;
+- Python 3.11 ou superior (versão mínima declarada pelo projeto);
 - Ollama em execução;
 - modelo `qwen2.5:3b` e um modelo de embeddings compatível instalado:
   `nomic-embed-text` (padrão) ou `embeddinggemma`.
+
+O ambiente funcional atual foi usado e validado com **Python 3.12.13**. O
+Python 3.11 permanece como versão mínima declarada, mas a reprodução exata
+registrada neste repositório corresponde ao Python 3.12.13 no Windows.
 
 Para conferir os modelos:
 
@@ -41,13 +45,26 @@ deactivate
 
 ## Instalar as dependências
 
-Com o ambiente ativado:
+O `requirements.txt` contém somente as dependências diretas do projeto, com
+as versões do ambiente funcional atual. Para a instalação normal, com o
+ambiente ativado, execute:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-Esse comando também instala o Streamlit usado pela interface local.
+Para reproduzir exatamente o conjunto completo validado no Windows com Python
+3.12.13, incluindo as dependências transitivas, use:
+
+```powershell
+python -m pip install -r requirements-lock.txt
+```
+
+O `requirements-lock.txt` representa uma fotografia completa da `.venv`
+validada. Os modelos do Ollama não são dependências Python e não fazem parte
+desses arquivos. Instalar qualquer um dos arquivos de requisitos não baixa
+automaticamente `qwen2.5:3b`, `nomic-embed-text`, `embeddinggemma` ou outros
+modelos do Ollama.
 
 ## Testar o Ollama
 

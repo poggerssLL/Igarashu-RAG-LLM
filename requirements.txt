@@ -1,6 +1,6 @@
-ollama
-chromadb
-PyMuPDF
-python-dotenv
-pytest
-streamlit
+ollama==0.6.2
+chromadb==1.5.9
+PyMuPDF==1.28.2
+python-dotenv==1.2.3
+pytest==9.1.1
+streamlit==1.62.0
