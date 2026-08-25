@@ -1,0 +1,86 @@
+[
+  {
+    "pergunta": "O que caracteriza os sinais periódicos?",
+    "paginas_esperadas": [42],
+    "termos_esperados": ["periodic", "fundamental period"],
+    "observacao": "Teste bilíngue: pergunta em português e resposta presente somente no livro inglês."
+  },
+  {
+    "pergunta": "What characterizes periodic signals?",
+    "paginas_esperadas": [42],
+    "termos_esperados": ["periodic", "fundamental period"],
+    "observacao": "Controle em inglês para o mesmo conteúdo do livro Oppenheim."
+  },
+  {
+    "pergunta": "Como os sistemas de controle a dados amostrados podem ser modelados e que tipo de sinais utilizam?",
+    "paginas_esperadas": [2],
+    "termos_esperados": ["equações a diferenças", "sequências numéricas"],
+    "observacao": "Conceitos introdutórios de sistemas a tempo discreto."
+  },
+  {
+    "pergunta": "O que representa a transformada estrela X*(s)?",
+    "paginas_esperadas": [5],
+    "termos_esperados": ["starred transform", "x(nT)"],
+    "observacao": "Definição da transformada estrela a partir das amostras."
+  },
+  {
+    "pergunta": "Como e*(t) é representado usando impulsos?",
+    "paginas_esperadas": [7],
+    "termos_esperados": ["sequência de impulsos", "trem de impulsos"],
+    "observacao": "Representação temporal do sinal amostrado ideal."
+  },
+  {
+    "pergunta": "Por que o amostrador ideal não é fisicamente realizável e como a amostragem pode ser interpretada?",
+    "paginas_esperadas": [8],
+    "termos_esperados": ["impulsos", "modulador de impulsos"],
+    "observacao": "Interpretação do amostrador como modulador."
+  },
+  {
+    "pergunta": "Qual é a propriedade de periodicidade de E*(s)?",
+    "paginas_esperadas": [12],
+    "termos_esperados": ["periódica em s", "jωs"],
+    "observacao": "Primeira propriedade da transformada estrela."
+  },
+  {
+    "pergunta": "Onde aparecem os polos de E*(s) quando E(s) possui um polo em s = s1?",
+    "paginas_esperadas": [13],
+    "termos_esperados": ["jmωs", "zeros de E*(s)"],
+    "observacao": "Multiplicação periódica dos polos."
+  },
+  {
+    "pergunta": "Como é enunciado o teorema da amostragem de Shannon?",
+    "paginas_esperadas": [15],
+    "termos_esperados": ["Shannon", "1/(2f0)"],
+    "observacao": "Enunciado e espaçamento máximo entre amostras."
+  },
+  {
+    "pergunta": "O que é frequency aliasing e qual filtro pode ser usado antes do amostrador?",
+    "paginas_esperadas": [17],
+    "termos_esperados": ["frequency aliasing", "filtro anti-aliasing"],
+    "observacao": "Sobreposição espectral e sua mitigação."
+  },
+  {
+    "pergunta": "No exemplo e(t) = 3 sin 4t + 2 sin 7t, qual é a frequência mínima de amostragem?",
+    "paginas_esperadas": [19],
+    "termos_esperados": ["14 rad/s", "2, 2282 Hz"],
+    "observacao": "Resultado numérico do exemplo 2.4."
+  },
+  {
+    "pergunta": "Qual é a função de transferência do retentor de ordem zero?",
+    "paginas_esperadas": [21],
+    "termos_esperados": ["Gzoh(s)", "duração T"],
+    "observacao": "Modelo do retentor no domínio de Laplace."
+  },
+  {
+    "pergunta": "Como o retentor de ordem zero afeta amplitude e fase do sinal amostrado?",
+    "paginas_esperadas": [22, 23],
+    "termos_esperados": ["Gzoh(jω)", "−π rad"],
+    "observacao": "Resposta em frequência e efeito do retentor."
+  },
+  {
+    "pergunta": "Quais hipóteses são adotadas nos modelos do ADC e do DAC?",
+    "paginas_esperadas": [24],
+    "termos_esperados": ["erro de quantização", "síncrona", "retentor de ordem zero ideal"],
+    "observacao": "Hipóteses simplificadoras dos conversores."
+  }
+]

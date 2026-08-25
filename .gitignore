@@ -1,0 +1,81 @@
+# Ambientes Python, caches e cobertura
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Configuração local e credenciais
+.env
+.env.*
+!.env.example
+credentials.json
+credentials*.json
+secrets.json
+secrets*.json
+tokens.json
+tokens*.json
+*.credential
+*.credentials
+*.secret
+*.token
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs, temporários e arquivos locais de ferramentas
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+~$*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Índices, vetores e outros dados gerados pelo RAG
+Dados/*
+!Dados/.gitkeep
+Dados/chroma/
+chroma.sqlite3
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.faiss
+*.hnsw
+*.ann
+*.index
+*.pickle
+
+# Materiais pessoais de estudo
+Documentos/*
+!Documentos/.gitkeep
+*.pdf
+
+# Modelos locais
+modelos/
+models/
+*.gguf
+*.ggml
+*.safetensors
+*.onnx
+*.pt
+*.pth
+
+# Saídas geradas pelas avaliações (podem conter respostas derivadas dos PDFs)
+avaliacao/linha_base_geracao.json
+avaliacao/resultado_fundamentado.json

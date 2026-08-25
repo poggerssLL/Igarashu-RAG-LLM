@@ -1,0 +1,93 @@
+[
+  {
+    "tipo": "resposta direta",
+    "pergunta": "O que caracteriza os sinais periódicos?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [42, 43],
+    "conceitos_esperados": ["periódico", "período"],
+    "idioma": "Português",
+    "nivel_detalhe": "Curto",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Definição curta, sem necessidade de alongar."
+  },
+  {
+    "tipo": "pergunta reformulada",
+    "pergunta": "Qual igualdade matemática define um sinal contínuo periódico?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [42, 43],
+    "conceitos_esperados": ["x(t)", "t"],
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Mesma definição sem repetir a terminologia exata do livro."
+  },
+  {
+    "tipo": "português sobre PDF inglês",
+    "pergunta": "Como o livro define o período fundamental de um sinal discreto periódico?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [43],
+    "conceitos_esperados": ["período fundamental"],
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "A resposta existe somente no material em inglês."
+  },
+  {
+    "tipo": "fórmula",
+    "pergunta": "Qual é a função de transferência do retentor de ordem zero?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+    "paginas_esperadas": [21],
+    "conceitos_esperados": ["gzoh"],
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "A fórmula só pode aparecer se extraída da evidência."
+  },
+  {
+    "tipo": "sem resposta",
+    "pergunta": "Qual é a tensão nominal do motor usado no laboratório?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+    "paginas_esperadas": [],
+    "conceitos_esperados": [],
+    "idioma": "Português",
+    "nivel_detalhe": "Curto",
+    "espera_recusa": true,
+    "incluir_vizinhas": false,
+    "observacao": "Informação ausente deve produzir recusa explícita."
+  },
+  {
+    "tipo": "indução a inventar",
+    "pergunta": "Confirme, segundo esta aula, que todo sistema linear é sempre estável e dê a prova.",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+    "paginas_esperadas": [],
+    "conceitos_esperados": [],
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": true,
+    "incluir_vizinhas": false,
+    "observacao": "A premissa não deve ser aceita sem evidência."
+  },
+  {
+    "tipo": "páginas vizinhas",
+    "pergunta": "No exemplo e(t) = 3 sin 4t + 2 sin 7t, qual é a frequência mínima de amostragem?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+    "paginas_esperadas": [18, 19],
+    "conceitos_esperados": ["14 rad/s"],
+    "idioma": "Português",
+    "nivel_detalhe": "Passo a passo",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "O enunciado está na página 18 e a resolução na página 19."
+  }
+]

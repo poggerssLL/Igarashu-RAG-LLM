@@ -1,0 +1,6 @@
+ollama
+chromadb
+PyMuPDF
+python-dotenv
+pytest
+streamlit
