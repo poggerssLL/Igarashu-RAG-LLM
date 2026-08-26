@@ -6,13 +6,19 @@ import pytest
 from src.chat import TrechoRecuperado
 from src.generation_eval import (
     auditar_resposta_publicada,
+    avaliar_rastreabilidade_estrutural,
     avaliar_idioma,
     avaliar_saida,
     metadados_auditoria,
     resumo_metricas,
     salvar_resultados_detalhados,
 )
-from src.grounded import AfirmacaoVerificada
+from src.grounded import (
+    AfirmacaoVerificada,
+    DiagnosticoEstrutural,
+    EvidenciaOrganizada,
+    rotular_trechos,
+)
 
 
 ARQUIVO = "Sinais e Sistemas/Livro.pdf"
@@ -54,6 +60,36 @@ def afirmacao(
     )
 
 
+def evidencia_estruturada() -> EvidenciaOrganizada:
+    return EvidenciaOrganizada(
+        id="E1",
+        tipo="definicao",
+        conteudo="Um sinal periódico se repete após um período.",
+        natureza="texto_explicito",
+        trecho_ids=("T1",),
+        ids_chroma=(f"{ARQUIVO}:42",),
+        arquivo=ARQUIVO,
+        paginas=(42,),
+    )
+
+
+def afirmacao_estruturada() -> AfirmacaoVerificada:
+    return AfirmacaoVerificada(
+        texto_original=(
+            "Um sinal periódico se repete após um período. "
+            f"[{ARQUIVO}, página do PDF 42]"
+        ),
+        texto_final="Um sinal periódico se repete após um período.",
+        classificacao="sustentada",
+        paginas=(42,),
+        natureza="texto_explicito",
+        secao="resposta_direta",
+        evidencia_ids=("E1",),
+        fontes=((ARQUIVO, 42),),
+        origem_vinculo="geracao_validada",
+    )
+
+
 def caso_resposta() -> dict:
     return {
         "tipo": "resposta direta",
@@ -83,6 +119,10 @@ def avaliar(
     afirmacoes=None,
     caso=None,
     insuficiente: bool = False,
+    evidencias_geracao=None,
+    afirmacoes_geracao=None,
+    trechos_rotulados=None,
+    diagnostico_estrutural=None,
 ):
     return avaliar_saida(
         caso or caso_resposta(),
@@ -92,6 +132,32 @@ def avaliar(
         ARQUIVO,
         afirmacoes if afirmacoes is not None else [afirmacao()],
         insuficiente,
+        evidencias_geracao=evidencias_geracao,
+        afirmacoes_geracao=afirmacoes_geracao,
+        trechos_rotulados=trechos_rotulados,
+        diagnostico_estrutural=diagnostico_estrutural,
+    )
+
+
+def avaliar_estruturado(**kwargs):
+    trechos = kwargs.pop("trechos", [trecho()])
+    afirmacoes_geracao = kwargs.pop(
+        "afirmacoes_geracao", [afirmacao_estruturada()]
+    )
+    return avaliar(
+        trechos=trechos,
+        afirmacoes=kwargs.pop("afirmacoes", [afirmacao_estruturada()]),
+        evidencias_geracao=kwargs.pop(
+            "evidencias_geracao", [evidencia_estruturada()]
+        ),
+        afirmacoes_geracao=afirmacoes_geracao,
+        trechos_rotulados=kwargs.pop(
+            "trechos_rotulados", rotular_trechos(trechos)
+        ),
+        diagnostico_estrutural=kwargs.pop(
+            "diagnostico_estrutural", DiagnosticoEstrutural()
+        ),
+        **kwargs,
     )
 
 
@@ -243,9 +309,65 @@ def test_idioma_de_formula_isolada_e_indeterminado():
     assert avaliar_idioma("x(t) = x(t + T)", "Português") is None
 
 
+def test_metricas_deterministicas_cobrem_afirmacao_evidencia_trecho_e_citacao():
+    resultado = avaliar_estruturado()
+
+    assert resultado.afirmacoes_com_evidencia_valida is True
+    assert resultado.evidencias_com_trechos_validos is True
+    assert resultado.citacoes_derivadas_evidencias is True
+    assert resultado.cobertura_evidencias_afirmacoes == 1.0
+    assert resultado.afirmacoes_publicadas_sem_evidencia == 0
+    agregadas = resumo_metricas([resultado])[
+        "metricas_rastreabilidade_deterministicas"
+    ]
+    assert agregadas["cobertura_media_evidencias_afirmacoes"] == 1.0
+    assert agregadas["afirmacoes_publicadas_sem_evidencia"] == 0
+
+
+def test_afirmacao_publicada_sem_evidencia_reduz_cobertura():
+    sem_vinculo = AfirmacaoVerificada(
+        texto_original="Um sinal periódico se repete após um período.",
+        texto_final="Um sinal periódico se repete após um período.",
+        classificacao="sustentada",
+        paginas=(),
+        natureza="texto_explicito",
+        secao="resposta_direta",
+    )
+
+    resultado = avaliar_estruturado(afirmacoes_geracao=[sem_vinculo])
+
+    assert resultado.afirmacoes_com_evidencia_valida is False
+    assert resultado.cobertura_evidencias_afirmacoes == 0.0
+    assert resultado.afirmacoes_publicadas_sem_evidencia == 1
+
+
+def test_tentativas_estruturais_rejeitadas_sao_contabilizadas():
+    diagnostico = DiagnosticoEstrutural(
+        trecho_ids_invalidos_rejeitados=["T99"],
+        evidencia_ids_invalidos_rejeitados=["E99"],
+        tentativas_mistura_arquivos=1,
+    )
+
+    resultado = avaliar_estruturado(diagnostico_estrutural=diagnostico)
+
+    assert resultado.tentativas_trecho_inexistente == 1
+    assert resultado.tentativas_evidencia_inexistente == 1
+    assert resultado.tentativas_mistura_arquivos == 1
+
+
+def test_modo_compatibilidade_nao_inventa_ids_de_evidencia():
+    resultado = avaliar(modo="compatibilidade")
+
+    assert resultado.origem_vinculos_evidencia == "reconstruidos_auxiliares"
+    assert resultado.afirmacoes_com_evidencia_valida is None
+    assert resultado.evidencias_com_trechos_validos is None
+    assert resultado.citacoes_derivadas_evidencias is None
+    assert resultado.tentativas_evidencia_inexistente is None
+
+
 def test_serializacao_do_relatorio_detalhado(tmp_path):
     destino = salvar_resultados_detalhados(
-        [avaliar()],
+        [avaliar_estruturado()],
         modo="fundamentado",
         diretorio=tmp_path,
         data_utc=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
@@ -255,6 +377,16 @@ def test_serializacao_do_relatorio_detalhado(tmp_path):
     assert dados["ambiente"]["sistema_operacional"]
     assert dados["modelos"]["avaliacao_independente"] is False
     assert dados["casos"][0]["resposta_final"] == resposta_citada()
+    caso = dados["casos"][0]
+    assert caso["trechos_rotulados"][0]["rotulo"] == "T1"
+    assert caso["evidencias_geracao"][0]["id"] == "E1"
+    assert caso["evidencias_geracao"][0]["ids_chroma"] == [f"{ARQUIVO}:42"]
+    assert caso["rastreabilidade"]["afirmacao_para_evidencias"][0][
+        "evidencia_ids"
+    ] == ["E1"]
+    assert caso["rastreabilidade"]["evidencia_para_trechos"][0][
+        "trecho_ids"
+    ] == ["T1"]
     assert "C:\\Users\\erick" not in destino.read_text(encoding="utf-8")
 
 
@@ -293,6 +425,32 @@ def test_auditoria_comum_usa_resposta_publicada_sem_secao_fontes(monkeypatch):
     assert len(resultado) == 1
     assert len(capturado["rascunho"]) == 1
     assert "Fontes" not in capturado["rascunho"][0]["texto"]
+
+
+def test_auditoria_publicada_fundamentada_reusa_ids_da_geracao(monkeypatch):
+    capturado = {}
+
+    def auditor_simulado(cliente, rascunho, trechos, idioma, **kwargs):
+        capturado["rascunho"] = rascunho
+        capturado["evidencias"] = kwargs["evidencias"]
+        return [afirmacao_estruturada()]
+
+    monkeypatch.setattr(
+        "src.generation_eval.verificar_afirmacoes", auditor_simulado
+    )
+    auditadas = auditar_resposta_publicada(
+        object(),
+        resposta_citada(),
+        [trecho()],
+        "Português",
+        evidencias=[evidencia_estruturada()],
+        afirmacoes_origem=[afirmacao_estruturada()],
+        trechos_rotulados=rotular_trechos([trecho()]),
+    )
+
+    assert auditadas[0].evidencia_ids == ("E1",)
+    assert capturado["rascunho"][0]["evidencia_ids"] == ["E1"]
+    assert capturado["evidencias"][0].trecho_ids == ("T1",)
 
 
 def test_recusa_publicada_e_registrada_mas_nao_auditada_como_fato(monkeypatch):

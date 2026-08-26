@@ -156,9 +156,12 @@ def exibir_evidencias(evidencias: list) -> None:
                 if evidencia.natureza == "deducao_simples"
                 else "texto explícito"
             )
+            paginas = ", ".join(str(pagina) for pagina in evidencia.paginas)
+            trechos = ", ".join(evidencia.trecho_ids)
             st.markdown(
-                f"- **{evidencia.tipo}** · página do PDF **{evidencia.pagina}** · "
-                f"`{natureza}`  \n  {evidencia.conteudo}"
+                f"- **{evidencia.id} · {evidencia.tipo}** · `{natureza}`  \n"
+                f"  Arquivo: **{evidencia.arquivo}** · página do PDF **{paginas}** · "
+                f"trechos `{trechos}`  \n  {evidencia.conteudo}"
             )
 
 
@@ -685,6 +688,9 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
             base, metricas, resultados = dados_geracao
             deterministicas = metricas["metricas_deterministicas"]
             auxiliares = metricas["metricas_auxiliares_qwen"]
+            rastreabilidade = metricas[
+                "metricas_rastreabilidade_deterministicas"
+            ]
 
             def exibir_contagem(metrica: dict) -> str:
                 aplicaveis = int(metrica.get("aplicaveis") or 0)
@@ -727,6 +733,16 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
                     f"insegura {exibir_contagem(aux_base['casos_sem_afirmacao_publicada_insegura'])}."
                 )
             st.caption(auxiliares["aviso"])
+            cobertura = rastreabilidade[
+                "cobertura_media_evidencias_afirmacoes"
+            ]
+            st.caption(
+                "Rastreabilidade determinística: cobertura afirmação→evidência "
+                f"{cobertura:.0%}; afirmações publicadas sem evidência "
+                f"{rastreabilidade['afirmacoes_publicadas_sem_evidencia']}."
+                if cobertura is not None
+                else "Rastreabilidade por IDs: não aplicável ao modo Compatibilidade."
+            )
             for item in resultados:
                 falhou = not resultado_aprovado(item)
                 if falhou:

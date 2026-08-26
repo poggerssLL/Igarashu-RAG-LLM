@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -24,7 +24,14 @@ from .config import (
     OLLAMA_HOST,
     RAIZ_PROJETO,
 )
-from .grounded import AfirmacaoVerificada, consultar_fundamentado, verificar_afirmacoes
+from .grounded import (
+    AfirmacaoVerificada,
+    DiagnosticoEstrutural,
+    EvidenciaOrganizada,
+    TrechoRotulado,
+    consultar_fundamentado,
+    verificar_afirmacoes,
+)
 from .index_manifest import carregar_manifesto
 
 
@@ -79,6 +86,21 @@ class ResultadoGeracao:
     gerador_e_auditor_iguais: bool
     avaliacao_independente: bool
     aviso_auditoria: str = AVISO_AUDITORIA_QWEN
+    evidencias_geracao: tuple[EvidenciaOrganizada, ...] = ()
+    afirmacoes_geracao: tuple[AfirmacaoVerificada, ...] = ()
+    trechos_rotulados: tuple[TrechoRotulado, ...] = ()
+    diagnostico_estrutural: DiagnosticoEstrutural = field(
+        default_factory=DiagnosticoEstrutural
+    )
+    origem_vinculos_evidencia: str = "nao_aplicavel"
+    afirmacoes_com_evidencia_valida: bool | None = None
+    evidencias_com_trechos_validos: bool | None = None
+    citacoes_derivadas_evidencias: bool | None = None
+    cobertura_evidencias_afirmacoes: float | None = None
+    tentativas_evidencia_inexistente: int | None = None
+    tentativas_trecho_inexistente: int | None = None
+    tentativas_mistura_arquivos: int | None = None
+    afirmacoes_publicadas_sem_evidencia: int | None = None
 
     @property
     def recuperou_pagina(self) -> bool | None:
@@ -104,6 +126,21 @@ class ResultadoGeracao:
             "recusa_correta": self.recusa_correta,
             "idioma_correto": self.idioma_correto,
             "resposta_presente": self.resposta_presente,
+            "afirmacoes_com_evidencia_valida": self.afirmacoes_com_evidencia_valida,
+            "evidencias_com_trechos_validos": self.evidencias_com_trechos_validos,
+            "citacoes_derivadas_evidencias": self.citacoes_derivadas_evidencias,
+        }
+
+    @property
+    def metricas_rastreabilidade_deterministicas(self) -> dict:
+        return {
+            "origem_vinculos": self.origem_vinculos_evidencia,
+            "cobertura_evidencias_afirmacoes": self.cobertura_evidencias_afirmacoes,
+            "tentativas_evidencia_inexistente": self.tentativas_evidencia_inexistente,
+            "tentativas_trecho_inexistente": self.tentativas_trecho_inexistente,
+            "tentativas_mistura_arquivos": self.tentativas_mistura_arquivos,
+            "afirmacoes_publicadas_sem_evidencia": self.afirmacoes_publicadas_sem_evidencia,
+            "ids_rejeitados": self.diagnostico_estrutural.como_dict(),
         }
 
     @property
@@ -234,6 +271,11 @@ def auditar_resposta_publicada(
     resposta: str,
     trechos: Sequence[TrechoRecuperado],
     idioma: str,
+    *,
+    evidencias: Sequence[EvidenciaOrganizada] | None = None,
+    afirmacoes_origem: Sequence[AfirmacaoVerificada] = (),
+    trechos_rotulados: Sequence[TrechoRotulado] | None = None,
+    diagnostico: DiagnosticoEstrutural | None = None,
 ) -> list[AfirmacaoVerificada]:
     """Audita a mesma resposta pós-publicação nos dois modos."""
     sentencas = [
@@ -249,19 +291,47 @@ def auditar_resposta_publicada(
     paginas_disponiveis = list(dict.fromkeys(item.pagina for item in trechos))
     rascunho = []
     for sentenca in sentencas:
+        texto_sem_citacoes = _PADRAO_CITACAO.sub("", sentenca).strip()
         paginas_citadas = [pagina for _, pagina in extrair_citacoes(sentenca)]
         paginas = [
             pagina for pagina in paginas_citadas if pagina in paginas_disponiveis
         ] or paginas_disponiveis
+        evidencia_ids: list[str] = []
+        if evidencias is not None:
+            texto_normalizado = normalizar(texto_sem_citacoes)
+            correspondentes = [
+                item
+                for item in afirmacoes_origem
+                if item.texto_final
+                and (
+                    normalizar(item.texto_final) in texto_normalizado
+                    or texto_normalizado in normalizar(item.texto_final)
+                )
+            ]
+            if correspondentes:
+                evidencia_ids = list(correspondentes[0].evidencia_ids)
         rascunho.append(
             {
-                "texto": sentenca,
+                "texto": texto_sem_citacoes,
+                "texto_original_publicado": sentenca,
                 "secao": "resposta_publicada",
                 "paginas": paginas,
+                "evidencia_ids": evidencia_ids,
                 "natureza": "texto_explicito",
             }
         )
-    return verificar_afirmacoes(cliente, rascunho, trechos, idioma)
+    if evidencias is None:
+        return verificar_afirmacoes(cliente, rascunho, trechos, idioma)
+    return verificar_afirmacoes(
+        cliente,
+        rascunho,
+        trechos,
+        idioma,
+        evidencias=evidencias,
+        trechos_rotulados=trechos_rotulados,
+        diagnostico=diagnostico,
+        origem_vinculo="geracao_validada",
+    )
 
 
 def auditar_resposta_compatibilidade(
@@ -332,14 +402,170 @@ def _citacoes_sustentam_afirmacoes(
         return False
     for afirmacao in afirmacoes:
         citacoes = extrair_citacoes(afirmacao.texto_original)
-        paginas_citadas = {pagina for _, pagina in citacoes}
+        fontes_citadas = {
+            (normalizar_caminho(arquivo), pagina)
+            for arquivo, pagina in citacoes
+        }
+        fontes_associadas = {
+            (normalizar_caminho(arquivo), pagina)
+            for arquivo, pagina in afirmacao.fontes
+        }
         if (
             afirmacao.classificacao != "sustentada"
             or not citacoes
-            or not paginas_citadas.intersection(afirmacao.paginas)
+            or not fontes_citadas.issubset(fontes_associadas)
         ):
             return False
     return True
+
+
+def avaliar_rastreabilidade_estrutural(
+    *,
+    modo: str,
+    resposta: str,
+    espera_resposta: bool,
+    evidencias: Sequence[EvidenciaOrganizada] = (),
+    afirmacoes: Sequence[AfirmacaoVerificada] = (),
+    trechos_rotulados: Sequence[TrechoRotulado] = (),
+    diagnostico: DiagnosticoEstrutural | None = None,
+) -> dict:
+    """Mede os vínculos de IDs sem usar julgamento semântico do modelo."""
+    if modo != "fundamentado":
+        return {
+            "origem_vinculos": "reconstruidos_auxiliares",
+            "afirmacoes_com_evidencia_valida": None,
+            "evidencias_com_trechos_validos": None,
+            "citacoes_derivadas_evidencias": None,
+            "cobertura_evidencias_afirmacoes": None,
+            "tentativas_evidencia_inexistente": None,
+            "tentativas_trecho_inexistente": None,
+            "tentativas_mistura_arquivos": None,
+            "afirmacoes_publicadas_sem_evidencia": None,
+        }
+
+    diagnostico = diagnostico or DiagnosticoEstrutural()
+    por_rotulo = {item.rotulo: item for item in trechos_rotulados}
+    por_evidencia = {item.id: item for item in evidencias}
+
+    def evidencia_valida(item: EvidenciaOrganizada) -> bool:
+        if not item.trecho_ids or len(item.trecho_ids) != len(item.ids_chroma):
+            return False
+        associados = [por_rotulo.get(rotulo) for rotulo in item.trecho_ids]
+        return bool(
+            all(associados)
+            and all(
+                associado is not None
+                and associado.id_chroma == id_chroma
+                and associado.arquivo == item.arquivo
+                and associado.pagina in item.paginas
+                for associado, id_chroma in zip(associados, item.ids_chroma)
+            )
+            and len({associado.arquivo for associado in associados if associado}) == 1
+        )
+
+    validade_evidencias = {
+        item.id: evidencia_valida(item) for item in evidencias
+    }
+
+    def afirmacao_valida(item: AfirmacaoVerificada) -> bool:
+        selecionadas = [
+            por_evidencia.get(evidencia_id)
+            for evidencia_id in item.evidencia_ids
+        ]
+        return bool(
+            item.evidencia_ids
+            and not item.ids_evidencia_invalidos
+            and all(selecionadas)
+            and all(validade_evidencias.get(evidencia_id, False) for evidencia_id in item.evidencia_ids)
+            and len({evidencia.arquivo for evidencia in selecionadas if evidencia}) == 1
+        )
+
+    afirmacoes_factuais = [item for item in afirmacoes if item.texto_original]
+    afirmacoes_validas = (
+        all(afirmacao_valida(item) for item in afirmacoes_factuais)
+        if afirmacoes_factuais
+        else (False if espera_resposta else None)
+    )
+    evidencias_validas = (
+        all(validade_evidencias.values())
+        if evidencias
+        else (False if espera_resposta else None)
+    )
+
+    publicadas = [
+        sentenca
+        for sentenca in extrair_afirmacoes_publicadas(resposta)
+        if not resposta_recusou(sentenca)
+    ]
+    publicadas_validas = 0
+    publicadas_sem_evidencia = 0
+    citacoes_por_afirmacao_validas = True
+    fontes_derivadas: set[tuple[str, int]] = set()
+    for sentenca in publicadas:
+        limpa = normalizar(_PADRAO_CITACAO.sub("", sentenca))
+        correspondentes = [
+            item
+            for item in afirmacoes
+            if item.texto_final
+            and (
+                normalizar(item.texto_final) in limpa
+                or limpa in normalizar(item.texto_final)
+            )
+        ]
+        afirmacao = correspondentes[0] if correspondentes else None
+        if afirmacao is None or not afirmacao_valida(afirmacao):
+            publicadas_sem_evidencia += 1
+            citacoes_por_afirmacao_validas = False
+            continue
+        publicadas_validas += 1
+        fontes = set(
+            _fontes_da_afirmacao_por_evidencias(afirmacao, por_evidencia)
+        )
+        fontes_derivadas.update(fontes)
+        if set(extrair_citacoes(sentenca)) != fontes:
+            citacoes_por_afirmacao_validas = False
+
+    todas_citacoes = set(extrair_citacoes(resposta))
+    citacoes_derivadas = (
+        bool(publicadas)
+        and publicadas_sem_evidencia == 0
+        and citacoes_por_afirmacao_validas
+        and todas_citacoes == fontes_derivadas
+        if espera_resposta
+        else None
+    )
+    cobertura = (
+        publicadas_validas / len(publicadas) if publicadas else None
+    )
+    return {
+        "origem_vinculos": "ids_usados_na_geracao",
+        "afirmacoes_com_evidencia_valida": afirmacoes_validas,
+        "evidencias_com_trechos_validos": evidencias_validas,
+        "citacoes_derivadas_evidencias": citacoes_derivadas,
+        "cobertura_evidencias_afirmacoes": cobertura,
+        "tentativas_evidencia_inexistente": len(
+            diagnostico.evidencia_ids_invalidos_rejeitados
+        ),
+        "tentativas_trecho_inexistente": len(
+            diagnostico.trecho_ids_invalidos_rejeitados
+        ),
+        "tentativas_mistura_arquivos": diagnostico.tentativas_mistura_arquivos,
+        "afirmacoes_publicadas_sem_evidencia": publicadas_sem_evidencia,
+    }
+
+
+def _fontes_da_afirmacao_por_evidencias(
+    afirmacao: AfirmacaoVerificada,
+    por_evidencia: dict[str, EvidenciaOrganizada],
+) -> tuple[tuple[str, int], ...]:
+    return tuple(
+        dict.fromkeys(
+            (evidencia.arquivo, pagina)
+            for evidencia_id in afirmacao.evidencia_ids
+            if (evidencia := por_evidencia.get(evidencia_id)) is not None
+            for pagina in evidencia.paginas
+        )
+    )
 
 
 def avaliar_saida(
@@ -354,6 +580,10 @@ def avaliar_saida(
     duracao_segundos: float = 0.0,
     modelo_gerador: str = MODELO_CONVERSA,
     modelo_auditor: str = MODELO_CONVERSA,
+    evidencias_geracao: Sequence[EvidenciaOrganizada] | None = None,
+    afirmacoes_geracao: Sequence[AfirmacaoVerificada] | None = None,
+    trechos_rotulados: Sequence[TrechoRotulado] | None = None,
+    diagnostico_estrutural: DiagnosticoEstrutural | None = None,
 ) -> ResultadoGeracao:
     paginas = tuple(dict.fromkeys(item.pagina for item in trechos))
     fontes = tuple(dict.fromkeys((item.arquivo, item.pagina) for item in trechos))
@@ -406,6 +636,28 @@ def avaliar_saida(
         for item in afirmacoes
     )
     auditoria = metadados_auditoria(modelo_gerador, modelo_auditor)
+    diagnostico_estrutural = diagnostico_estrutural or DiagnosticoEstrutural()
+    if (
+        modo == "fundamentado"
+        and evidencias_geracao is not None
+        and afirmacoes_geracao is not None
+        and trechos_rotulados is not None
+    ):
+        rastreabilidade = avaliar_rastreabilidade_estrutural(
+            modo=modo,
+            resposta=resposta,
+            espera_resposta=espera_resposta,
+            evidencias=evidencias_geracao,
+            afirmacoes=afirmacoes_geracao,
+            trechos_rotulados=trechos_rotulados,
+            diagnostico=diagnostico_estrutural,
+        )
+    else:
+        rastreabilidade = avaliar_rastreabilidade_estrutural(
+            modo="compatibilidade",
+            resposta=resposta,
+            espera_resposta=espera_resposta,
+        )
     expectativa = {
         "arquivo": arquivo_esperado,
         "paginas_esperadas": sorted(esperadas),
@@ -455,6 +707,35 @@ def avaliar_saida(
             auditoria["gerador_e_auditor_iguais"]
         ),
         avaliacao_independente=bool(auditoria["avaliacao_independente"]),
+        evidencias_geracao=tuple(evidencias_geracao or ()),
+        afirmacoes_geracao=tuple(afirmacoes_geracao or ()),
+        trechos_rotulados=tuple(trechos_rotulados or ()),
+        diagnostico_estrutural=diagnostico_estrutural,
+        origem_vinculos_evidencia=str(rastreabilidade["origem_vinculos"]),
+        afirmacoes_com_evidencia_valida=rastreabilidade[
+            "afirmacoes_com_evidencia_valida"
+        ],
+        evidencias_com_trechos_validos=rastreabilidade[
+            "evidencias_com_trechos_validos"
+        ],
+        citacoes_derivadas_evidencias=rastreabilidade[
+            "citacoes_derivadas_evidencias"
+        ],
+        cobertura_evidencias_afirmacoes=rastreabilidade[
+            "cobertura_evidencias_afirmacoes"
+        ],
+        tentativas_evidencia_inexistente=rastreabilidade[
+            "tentativas_evidencia_inexistente"
+        ],
+        tentativas_trecho_inexistente=rastreabilidade[
+            "tentativas_trecho_inexistente"
+        ],
+        tentativas_mistura_arquivos=rastreabilidade[
+            "tentativas_mistura_arquivos"
+        ],
+        afirmacoes_publicadas_sem_evidencia=rastreabilidade[
+            "afirmacoes_publicadas_sem_evidencia"
+        ],
     )
 
 
@@ -467,6 +748,10 @@ def resultado_aprovado(resultado: ResultadoGeracao) -> bool:
         all(deterministicas)
         and resultado.citacao_sustenta_afirmacao is not False
         and resultado.nao_sustentadas_publicadas == 0
+        and resultado.tentativas_evidencia_inexistente in {None, 0}
+        and resultado.tentativas_trecho_inexistente in {None, 0}
+        and resultado.tentativas_mistura_arquivos in {None, 0}
+        and resultado.afirmacoes_publicadas_sem_evidencia in {None, 0}
     )
 
 
@@ -495,6 +780,9 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         "idioma_correto",
         "resposta_presente",
         "recusa_correta",
+        "afirmacoes_com_evidencia_valida",
+        "evidencias_com_trechos_validos",
+        "citacoes_derivadas_evidencias",
     )
     deterministicas = {
         nome: _agregar_booleanos(resultados, nome)
@@ -527,6 +815,32 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         ) if resultados else False,
         "aviso": AVISO_AUDITORIA_QWEN,
     }
+    coberturas = [
+        item.cobertura_evidencias_afirmacoes
+        for item in resultados
+        if item.cobertura_evidencias_afirmacoes is not None
+    ]
+    rastreabilidade = {
+        "origens_vinculos": sorted(
+            {item.origem_vinculos_evidencia for item in resultados}
+        ),
+        "cobertura_media_evidencias_afirmacoes": (
+            sum(coberturas) / len(coberturas) if coberturas else None
+        ),
+        "casos_cobertura_aplicavel": len(coberturas),
+        "tentativas_evidencia_inexistente": sum(
+            item.tentativas_evidencia_inexistente or 0 for item in resultados
+        ),
+        "tentativas_trecho_inexistente": sum(
+            item.tentativas_trecho_inexistente or 0 for item in resultados
+        ),
+        "tentativas_mistura_arquivos": sum(
+            item.tentativas_mistura_arquivos or 0 for item in resultados
+        ),
+        "afirmacoes_publicadas_sem_evidencia": sum(
+            item.afirmacoes_publicadas_sem_evidencia or 0 for item in resultados
+        ),
+    }
 
     def taxa(nome: str) -> float | None:
         valor = deterministicas[nome]["taxa"]
@@ -539,6 +853,7 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         "versao_esquema": VERSAO_ESQUEMA_AVALIACAO,
         "casos": total,
         "metricas_deterministicas": deterministicas,
+        "metricas_rastreabilidade_deterministicas": rastreabilidade,
         "metricas_auxiliares_qwen": auxiliares,
         # Chaves legadas para a interface e consumidores existentes.
         "recuperacao_pagina": taxa("pagina_correta"),
@@ -591,6 +906,13 @@ def _serializar_afirmacao(item: AfirmacaoVerificada) -> dict:
         "natureza": item.natureza,
         "secao": item.secao,
         "justificativa_auditor": item.justificativa,
+        "evidencia_ids": list(item.evidencia_ids),
+        "fontes_derivadas": [
+            {"arquivo": arquivo, "pagina_pdf": pagina}
+            for arquivo, pagina in item.fontes
+        ],
+        "origem_vinculo": item.origem_vinculo,
+        "ids_evidencia_invalidos": list(item.ids_evidencia_invalidos),
     }
 
 
@@ -610,7 +932,34 @@ def _serializar_trecho(item: TrechoRecuperado) -> dict:
     }
 
 
+def _serializar_trecho_rotulado(item: TrechoRotulado) -> dict:
+    return {
+        "rotulo": item.rotulo,
+        "id_chroma": item.id_chroma,
+        "arquivo": item.arquivo,
+        "pagina_pdf": item.pagina,
+        "indice_trecho": item.indice,
+        "texto": item.texto,
+    }
+
+
+def _serializar_evidencia(item: EvidenciaOrganizada) -> dict:
+    return {
+        "id": item.id,
+        "tipo": item.tipo,
+        "conteudo": item.conteudo,
+        "natureza": item.natureza,
+        "trecho_ids": list(item.trecho_ids),
+        "ids_chroma": list(item.ids_chroma),
+        "arquivo": item.arquivo,
+        "paginas_pdf": list(item.paginas),
+    }
+
+
 def serializar_resultado(item: ResultadoGeracao) -> dict:
+    evidencias_por_id = {
+        evidencia.id: evidencia for evidencia in item.evidencias_geracao
+    }
     return {
         "duracao_segundos": item.duracao_segundos,
         "tipo": item.tipo_caso,
@@ -620,6 +969,18 @@ def serializar_resultado(item: ResultadoGeracao) -> dict:
         "afirmacoes_publicadas_extraidas": list(item.afirmacoes_publicadas),
         "documento_escolhido": item.documento,
         "trechos_recuperados": [_serializar_trecho(trecho) for trecho in item.trechos],
+        "trechos_rotulados": [
+            _serializar_trecho_rotulado(trecho)
+            for trecho in item.trechos_rotulados
+        ],
+        "evidencias_geracao": [
+            _serializar_evidencia(evidencia)
+            for evidencia in item.evidencias_geracao
+        ],
+        "afirmacoes_geracao": [
+            _serializar_afirmacao(afirmacao)
+            for afirmacao in item.afirmacoes_geracao
+        ],
         "paginas_retornadas": list(item.paginas_retornadas),
         "fontes_retornadas": [
             {"arquivo": arquivo, "pagina_pdf": pagina}
@@ -633,7 +994,32 @@ def serializar_resultado(item: ResultadoGeracao) -> dict:
             _serializar_afirmacao(afirmacao)
             for afirmacao in item.afirmacoes_auditadas
         ],
+        "rastreabilidade": {
+            "origem_vinculos": item.origem_vinculos_evidencia,
+            "afirmacao_para_evidencias": [
+                {
+                    "texto": afirmacao.texto_original,
+                    "evidencia_ids": list(afirmacao.evidencia_ids),
+                    "paginas_derivadas": list(afirmacao.paginas),
+                }
+                for afirmacao in item.afirmacoes_auditadas
+            ],
+            "evidencia_para_trechos": [
+                {
+                    "evidencia_id": evidencia.id,
+                    "trecho_ids": list(evidencia.trecho_ids),
+                    "ids_chroma": list(evidencia.ids_chroma),
+                    "arquivo": evidencia.arquivo,
+                    "paginas_pdf": list(evidencia.paginas),
+                }
+                for evidencia in evidencias_por_id.values()
+            ],
+            "validacao_estrutural": item.metricas_rastreabilidade_deterministicas,
+        },
         "metricas_deterministicas": item.metricas_deterministicas,
+        "metricas_rastreabilidade_deterministicas": (
+            item.metricas_rastreabilidade_deterministicas
+        ),
         "metricas_auxiliares_qwen": item.metricas_auxiliares_qwen,
         "observacao": item.observacao,
         "limitacoes": [item.aviso_auditoria],
@@ -688,6 +1074,8 @@ def criar_relatorio_detalhado(
             AVISO_AUDITORIA_QWEN,
             "Métricas determinísticas não aplicáveis são registradas como null e excluídas dos denominadores.",
             "Frases programáticas de recusa são registradas como texto publicado, mas avaliadas por recusa_correta em vez da auditoria factual do Qwen.",
+            "No modo Fundamentado, citações são derivadas de IDs validados; no modo Compatibilidade, vínculos pós-publicação são apenas reconstruções auxiliares.",
+            "Os campos de rastreabilidade foram adicionados de forma compatível ao esquema 2.0.",
             "O arquivo avaliacao/linha_base_geracao.json pertence ao esquema anterior e não é comparável diretamente.",
         ],
     }
@@ -774,6 +1162,10 @@ def executar_avaliacao_geracao(
                 resultado.resposta,
                 resultado.trechos,
                 caso.get("idioma", "Português"),
+                evidencias=resultado.evidencias,
+                afirmacoes_origem=resultado.afirmacoes,
+                trechos_rotulados=resultado.trechos_rotulados,
+                diagnostico=resultado.diagnostico_estrutural,
             )
             item = avaliar_saida(
                 caso,
@@ -784,6 +1176,10 @@ def executar_avaliacao_geracao(
                 auditoria_final,
                 resultado.insuficiente,
                 duracao_segundos=time.perf_counter() - inicio_caso,
+                evidencias_geracao=resultado.evidencias,
+                afirmacoes_geracao=resultado.afirmacoes,
+                trechos_rotulados=resultado.trechos_rotulados,
+                diagnostico_estrutural=resultado.diagnostico_estrutural,
             )
         elif modo == "compatibilidade":
             trechos, resposta = consultar(

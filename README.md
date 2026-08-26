@@ -136,10 +136,19 @@ O modo padrão de consulta é **Fundamentado**. Ele não faz síntese entre vár
 2. repete a recuperação filtrando simultaneamente matéria e campo `arquivo`;
 3. seleciona de quatro a seis trechos fortes, remove duplicatas e considera continuações
    em páginas vizinhas;
-4. pede ao Qwen para organizar fatos, definições, fórmulas, condições e limitações;
-5. redige a resposta no nível de detalhe solicitado;
-6. audita as afirmações e publica somente as classificadas como sustentadas;
-7. adiciona programaticamente apenas citações de páginas recuperadas.
+4. atribui rótulos efêmeros `T1`, `T2` etc. aos IDs reais dos trechos do ChromaDB;
+5. pede ao Qwen para organizar fatos, definições, fórmulas, condições e limitações,
+   obrigatoriamente vinculados aos rótulos `Tn`;
+6. valida os vínculos e cria programaticamente evidências `E1`, `E2` etc.;
+7. exige que cada afirmação declare seus `evidencia_ids` e entrega ao auditor somente
+   essas evidências e seus trechos;
+8. publica somente afirmações sustentadas e gera as citações a partir da relação
+   `afirmação → En → Tn → ID do ChromaDB → arquivo/página`.
+
+Os rótulos `Tn` e `En` existem somente durante a consulta atual. Arquivo e página nunca
+são aceitos do modelo: o programa os deriva dos IDs validados. Assim, dois trechos da
+mesma página continuam distinguíveis, IDs inexistentes são rejeitados e uma evidência
+não pode combinar PDFs diferentes.
 
 Na interface, o seletor **Fonte** oferece `Automático` e os PDFs indexados na matéria.
 O motivo da escolha automática é mostrado acima da resposta. O seletor **Modo de
@@ -273,6 +282,13 @@ entre afirmação, citação e trecho é auditada pelo Qwen e aparece separadame
 relatório registra `avaliacao_independente: false`; essa auditoria não substitui gabarito
 ou revisão humana. A execução pode demorar alguns minutos e permanece separada da
 avaliação rápida de recuperação na interface.
+
+No modo Fundamentado, o relatório também registra deterministicamente os rótulos `Tn`,
+IDs reais do ChromaDB, evidências `En`, vínculos afirmação→evidência, páginas derivadas,
+IDs inválidos rejeitados, tentativas de misturar arquivos e cobertura de evidências por
+afirmação. No modo Compatibilidade essas métricas ficam como não aplicáveis; eventuais
+vínculos da auditoria são identificados como reconstruídos e não como IDs usados na
+geração. Esses campos foram adicionados de forma compatível ao esquema `2.0`.
 
 ## Interface local
 

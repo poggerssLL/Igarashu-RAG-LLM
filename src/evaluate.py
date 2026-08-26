@@ -221,6 +221,27 @@ def main() -> int:
                 print("  Métricas determinísticas:")
                 for chave, metrica in metricas["metricas_deterministicas"].items():
                     print(f"    {chave}: {formatar_metrica_agregada(metrica)}")
+                rastreabilidade = metricas[
+                    "metricas_rastreabilidade_deterministicas"
+                ]
+                print("  Rastreabilidade determinística de evidências:")
+                print(
+                    "    cobertura média afirmação→evidência: "
+                    + (
+                        f"{rastreabilidade['cobertura_media_evidencias_afirmacoes']:.1%}"
+                        if rastreabilidade[
+                            "cobertura_media_evidencias_afirmacoes"
+                        ] is not None
+                        else "não aplicável"
+                    )
+                )
+                for chave in (
+                    "tentativas_evidencia_inexistente",
+                    "tentativas_trecho_inexistente",
+                    "tentativas_mistura_arquivos",
+                    "afirmacoes_publicadas_sem_evidencia",
+                ):
+                    print(f"    {chave}: {rastreabilidade[chave]}")
                 auxiliares = metricas["metricas_auxiliares_qwen"]
                 print("  Métricas auxiliares pelo Qwen (não independentes):")
                 print(

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Sequence
 
 from ollama import Client, ResponseError
@@ -32,11 +31,32 @@ MODO_AUTOMATICO = "Automático"
 
 
 @dataclass(frozen=True)
+class TrechoRotulado:
+    """Rótulo efêmero de um trecho recuperado durante uma única consulta."""
+
+    rotulo: str
+    id_chroma: str
+    arquivo: str
+    pagina: int
+    indice: int
+    texto: str
+
+
+@dataclass(frozen=True)
 class EvidenciaOrganizada:
+    id: str
     tipo: str
     conteudo: str
-    pagina: int
     natureza: str
+    trecho_ids: tuple[str, ...]
+    ids_chroma: tuple[str, ...]
+    arquivo: str
+    paginas: tuple[int, ...]
+
+    @property
+    def pagina(self) -> int:
+        """Compatibilidade com consumidores antigos que exibiam uma página."""
+        return self.paginas[0] if self.paginas else 0
 
 
 @dataclass(frozen=True)
@@ -48,6 +68,38 @@ class AfirmacaoVerificada:
     natureza: str
     secao: str
     justificativa: str = ""
+    evidencia_ids: tuple[str, ...] = ()
+    fontes: tuple[tuple[str, int], ...] = ()
+    origem_vinculo: str = "ausente"
+    ids_evidencia_invalidos: tuple[str, ...] = ()
+
+
+@dataclass
+class DiagnosticoEstrutural:
+    """Tentativas rejeitadas deterministicamente no encadeamento de IDs."""
+
+    trecho_ids_invalidos_rejeitados: list[str] = field(default_factory=list)
+    evidencia_ids_invalidos_rejeitados: list[str] = field(default_factory=list)
+    ids_adicionados_auditor_rejeitados: list[str] = field(default_factory=list)
+    tentativas_mistura_arquivos: int = 0
+    evidencias_sem_trecho_rejeitadas: int = 0
+    afirmacoes_sem_evidencia: int = 0
+
+    def como_dict(self) -> dict:
+        return {
+            "trecho_ids_invalidos_rejeitados": list(
+                dict.fromkeys(self.trecho_ids_invalidos_rejeitados)
+            ),
+            "evidencia_ids_invalidos_rejeitados": list(
+                dict.fromkeys(self.evidencia_ids_invalidos_rejeitados)
+            ),
+            "ids_adicionados_auditor_rejeitados": list(
+                dict.fromkeys(self.ids_adicionados_auditor_rejeitados)
+            ),
+            "tentativas_mistura_arquivos": self.tentativas_mistura_arquivos,
+            "evidencias_sem_trecho_rejeitadas": self.evidencias_sem_trecho_rejeitadas,
+            "afirmacoes_sem_evidencia": self.afirmacoes_sem_evidencia,
+        }
 
 
 @dataclass(frozen=True)
@@ -60,6 +112,10 @@ class ResultadoFundamentado:
     resposta: str
     insuficiente: bool
     informacao_faltante: str = ""
+    trechos_rotulados: tuple[TrechoRotulado, ...] = ()
+    diagnostico_estrutural: DiagnosticoEstrutural = field(
+        default_factory=DiagnosticoEstrutural
+    )
 
     @property
     def nao_sustentadas(self) -> int:
@@ -208,10 +264,54 @@ def incluir_vizinhas_relevantes(
     return resultado
 
 
-def _contexto(trechos: Sequence[TrechoRecuperado]) -> str:
-    return "\n\n".join(
-        f"[E{numero}] Arquivo: {item.arquivo} | Página do PDF: {item.pagina}\n{item.texto}"
+def rotular_trechos(
+    trechos: Sequence[TrechoRecuperado],
+) -> list[TrechoRotulado]:
+    """Cria T1..Tn sem alterar nem inferir os IDs reais do ChromaDB."""
+    return [
+        TrechoRotulado(
+            rotulo=f"T{numero}",
+            id_chroma=item.id,
+            arquivo=item.arquivo,
+            pagina=item.pagina,
+            indice=item.indice,
+            texto=item.texto,
+        )
         for numero, item in enumerate(trechos, start=1)
+    ]
+
+
+def _contexto(trechos: Sequence[TrechoRotulado]) -> str:
+    return "\n\n".join(
+        f"[{item.rotulo}] Arquivo: {item.arquivo} | Página do PDF: {item.pagina} | "
+        f"Índice do trecho: {item.indice}\n{item.texto}"
+        for item in trechos
+    )
+
+
+def _evidencia_para_modelo(item: EvidenciaOrganizada) -> dict:
+    """Expõe ao modelo somente os IDs efêmeros já validados."""
+    return {
+        "id": item.id,
+        "tipo": item.tipo,
+        "conteudo": item.conteudo,
+        "natureza": item.natureza,
+        "trecho_ids": list(item.trecho_ids),
+    }
+
+
+def _fontes_evidencias(
+    evidencia_ids: Sequence[str],
+    evidencias: Sequence[EvidenciaOrganizada],
+) -> tuple[tuple[str, int], ...]:
+    por_id = {item.id: item for item in evidencias}
+    return tuple(
+        dict.fromkeys(
+            (evidencia.arquivo, pagina)
+            for evidencia_id in evidencia_ids
+            if (evidencia := por_id.get(evidencia_id)) is not None
+            for pagina in evidencia.paginas
+        )
     )
 
 
@@ -267,49 +367,85 @@ def organizar_evidencias(
     cliente: Client,
     pergunta: str,
     trechos: Sequence[TrechoRecuperado],
+    *,
+    trechos_rotulados: Sequence[TrechoRotulado] | None = None,
+    diagnostico: DiagnosticoEstrutural | None = None,
 ) -> tuple[list[EvidenciaOrganizada], bool, str]:
-    permitidas = {item.pagina for item in trechos}
+    diagnostico = diagnostico or DiagnosticoEstrutural()
+    rotulados = list(trechos_rotulados or rotular_trechos(trechos))
+    por_rotulo = {item.rotulo: item for item in rotulados}
     dados = _json_modelo(
         cliente,
-        "Você é um extrator de evidências. Use somente os trechos. Não responda à pergunta. "
+        "Você é um extrator de evidências. Use somente os trechos identificados por Tn. "
+        "Não responda à pergunta, não crie IDs e não devolva arquivo ou página. "
         "Retorne JSON válido, sem markdown.",
         f"""Pergunta: {pergunta}
 
 Organize fatos explícitos, definições, fórmulas, condições e limitações.
 Marque natureza como texto_explicito ou deducao_simples. Uma dedução simples deve
 decorrer diretamente das evidências, sem conhecimento externo.
+Cada evidência deve listar em trecho_ids somente rótulos Tn apresentados abaixo.
+Uma evidência pode usar vários trechos quando a informação continua em outra página.
 
 Formato:
 {{"suficiente": true, "informacao_faltante": "", "evidencias": [
   {{"tipo": "fato|definicao|formula|condicao|limitacao", "conteudo": "...",
-    "pagina": 1, "natureza": "texto_explicito|deducao_simples"}}
+    "trecho_ids": ["T1"], "natureza": "texto_explicito|deducao_simples"}}
 ]}}
 
 Trechos:
-{_contexto(trechos)}""",
+{_contexto(rotulados)}""",
         "organização das evidências",
     )
     evidencias: list[EvidenciaOrganizada] = []
     for item in dados.get("evidencias", []):
-        try:
-            pagina = int(item.get("pagina"))
-        except (TypeError, ValueError):
+        if not isinstance(item, dict):
             continue
         conteudo = str(item.get("conteudo") or "").strip()
-        if pagina not in permitidas or not conteudo:
+        ids_brutos = item.get("trecho_ids")
+        if not isinstance(ids_brutos, list):
+            diagnostico.evidencias_sem_trecho_rejeitadas += 1
+            continue
+        trecho_ids = tuple(
+            dict.fromkeys(
+                str(rotulo).strip()
+                for rotulo in ids_brutos
+                if str(rotulo).strip()
+            )
+        )
+        if not trecho_ids:
+            diagnostico.evidencias_sem_trecho_rejeitadas += 1
+            continue
+        invalidos = [rotulo for rotulo in trecho_ids if rotulo not in por_rotulo]
+        if invalidos:
+            diagnostico.trecho_ids_invalidos_rejeitados.extend(invalidos)
+            continue
+        selecionados = [por_rotulo[rotulo] for rotulo in trecho_ids]
+        sem_id_real = [item.rotulo for item in selecionados if not item.id_chroma]
+        if sem_id_real:
+            diagnostico.trecho_ids_invalidos_rejeitados.extend(sem_id_real)
+            continue
+        arquivos = {item.arquivo for item in selecionados}
+        if len(arquivos) != 1:
+            diagnostico.tentativas_mistura_arquivos += 1
+            continue
+        if not conteudo:
             continue
         natureza = str(item.get("natureza") or "texto_explicito")
         if natureza not in {"texto_explicito", "deducao_simples"}:
             natureza = "texto_explicito"
         nova = EvidenciaOrganizada(
+            id=f"E{len(evidencias) + 1}",
             tipo=str(item.get("tipo") or "fato"),
             conteudo=conteudo,
-            pagina=pagina,
             natureza=natureza,
+            trecho_ids=trecho_ids,
+            ids_chroma=tuple(item.id_chroma for item in selecionados),
+            arquivo=selecionados[0].arquivo,
+            paginas=tuple(dict.fromkeys(item.pagina for item in selecionados)),
         )
         if any(
-            existente.pagina == nova.pagina
-            and similaridade_textual(existente.conteudo, nova.conteudo) >= 0.80
+            similaridade_textual(existente.conteudo, nova.conteudo) >= 0.80
             for existente in evidencias
         ):
             continue
@@ -327,7 +463,9 @@ def redigir_rascunho(
     nivel: str,
     *,
     conservador: bool = False,
+    diagnostico: DiagnosticoEstrutural | None = None,
 ) -> list[dict]:
+    diagnostico = diagnostico or DiagnosticoEstrutural()
     instrucao_conservadora = (
         "Copie ou traduza fielmente a evidência mais direta, alterando apenas o necessário "
         "para formar uma frase clara. Não generalize e não introduza termos novos."
@@ -337,40 +475,55 @@ def redigir_rascunho(
     dados = _json_modelo(
         cliente,
         f"Escreva exclusivamente em {idioma}. Use somente as evidências estruturadas. "
-        "Retorne JSON válido e não acrescente conhecimento externo.",
+        "Retorne JSON válido, não acrescente conhecimento externo e não crie IDs.",
         f"""Pergunta: {pergunta}
 Nível de detalhe: {nivel}
 
 Crie afirmações concisas. Fórmula ou exemplo somente se houver evidência desse tipo.
-Para definição curta, não alongue. Cada afirmação deve declarar páginas e natureza.
+Para definição curta, não alongue. Toda afirmação factual deve declarar evidencia_ids.
+Use somente IDs En apresentados abaixo. Não devolva arquivo nem página.
 {instrucao_conservadora}
 
 Formato:
 {{"afirmacoes": [{{"texto": "...", "secao": "resposta_direta|explicacao|formula|exemplo|limitacao",
-"paginas": [1], "natureza": "texto_explicito|deducao_simples"}}]}}
+"evidencia_ids": ["E1"], "natureza": "texto_explicito|deducao_simples"}}]}}
 
 Evidências:
-{json.dumps([item.__dict__ for item in evidencias], ensure_ascii=False)}""",
+{json.dumps([_evidencia_para_modelo(item) for item in evidencias], ensure_ascii=False)}""",
         "redação da resposta",
     )
-    paginas_evidencia = {item.pagina for item in evidencias}
+    ids_evidencia = {item.id for item in evidencias}
     limite = {"Curto": 2, "Explicado": 4, "Passo a passo": 6}.get(nivel, 4)
     afirmacoes = []
-    for item in dados.get("afirmacoes", []):
+    itens_afirmacoes = dados.get("afirmacoes")
+    if itens_afirmacoes is None:
+        # Modelos pequenos por vezes localizam também a chave do JSON. Isso não
+        # altera nem completa os vínculos: cada item ainda precisa declarar seus
+        # próprios evidencia_ids válidos.
+        itens_afirmacoes = dados.get("afirmações", [])
+    if not isinstance(itens_afirmacoes, list):
+        itens_afirmacoes = []
+    for item in itens_afirmacoes:
         if not isinstance(item, dict) or not str(item.get("texto") or "").strip():
             continue
         secao_bruta = str(item.get("secao") or "explicacao")
-        paginas = [
-            int(pagina) for pagina in item.get("paginas", [])
-            if str(pagina).isdigit() and int(pagina) in paginas_evidencia
-        ]
-        if not paginas:
-            paginas = [
-                int(pagina) for pagina in re.findall(r"pagina\s*:\s*(\d+)", secao_bruta)
-                if int(pagina) in paginas_evidencia
-            ]
-        if not paginas and len(evidencias) == 1:
-            paginas = [evidencias[0].pagina]
+        ids_brutos = item.get("evidencia_ids")
+        evidencia_ids = tuple(
+            dict.fromkeys(
+                str(evidencia_id).strip()
+                for evidencia_id in ids_brutos
+                if str(evidencia_id).strip()
+            )
+        ) if isinstance(ids_brutos, list) else ()
+        invalidos = tuple(
+            evidencia_id
+            for evidencia_id in evidencia_ids
+            if evidencia_id not in ids_evidencia
+        )
+        if invalidos:
+            diagnostico.evidencia_ids_invalidos_rejeitados.extend(invalidos)
+        if not evidencia_ids:
+            diagnostico.afirmacoes_sem_evidencia += 1
         natureza = str(item.get("natureza") or "")
         if natureza not in {"texto_explicito", "deducao_simples"}:
             natureza = (
@@ -381,14 +534,16 @@ Evidências:
             {
                 "texto": str(item["texto"]).strip(),
                 "secao": secao_bruta.split("|", 1)[0],
-                "paginas": list(dict.fromkeys(paginas)),
+                "evidencia_ids": list(evidencia_ids),
+                "ids_evidencia_invalidos": list(invalidos),
+                "diagnostico_estrutural_registrado": True,
                 "natureza": natureza,
             }
         )
     return afirmacoes[:limite]
 
 
-def verificar_afirmacoes(
+def _verificar_afirmacoes_legado(
     cliente: Client,
     rascunho: Sequence[dict],
     trechos: Sequence[TrechoRecuperado],
@@ -416,13 +571,18 @@ Formato:
 Afirmações:
 {json.dumps(list(lote), ensure_ascii=False)}
 
-Trechos autorizados:
-{_contexto(trechos)}""",
+ Trechos autorizados:
+{_contexto(rotular_trechos(trechos))}""",
             etapa,
         )
         return [item for item in dados.get("afirmacoes", []) if isinstance(item, dict)]
 
-    auditadas = auditar_lote(originais, "verificação factual")
+    try:
+        auditadas = auditar_lote(originais, "verificação factual")
+    except ErroConsulta:
+        # A auditoria por LLM é auxiliar. Saída inválida reprova de forma
+        # conservadora, sem apagar as métricas determinísticas da execução.
+        auditadas = []
     por_id = {str(item.get("id")): item for item in auditadas if item.get("id")}
     # Se o modelo omitir um id, audita apenas o item ausente em uma chamada curta.
     fallbacks = 0
@@ -430,9 +590,14 @@ Trechos autorizados:
         if original["id"] not in por_id:
             if fallbacks >= 2:
                 continue
-            recuperado = auditar_lote(
-                [original], f"verificação factual de {original['id']}"
-            )
+            try:
+                recuperado = auditar_lote(
+                    [original], f"verificação factual de {original['id']}"
+                )
+            except ErroConsulta:
+                # Auditoria auxiliar inválida não pode aprovar a afirmação nem
+                # impedir a conclusão das métricas determinísticas.
+                recuperado = []
             fallbacks += 1
             if recuperado:
                 por_id[original["id"]] = recuperado[0]
@@ -474,6 +639,274 @@ Trechos autorizados:
                 natureza=natureza,
                 secao=str(item.get("secao") or original.get("secao") or "explicacao"),
                 justificativa=str(item.get("justificativa") or "").strip(),
+                fontes=tuple(
+                    dict.fromkeys(
+                        (trecho.arquivo, trecho.pagina)
+                        for trecho in trechos
+                        if trecho.pagina in paginas
+                    )
+                ),
+                origem_vinculo="reconstruido_auxiliar",
+            )
+        )
+    return verificadas
+
+
+def verificar_afirmacoes(
+    cliente: Client,
+    rascunho: Sequence[dict],
+    trechos: Sequence[TrechoRecuperado],
+    idioma: str,
+    *,
+    evidencias: Sequence[EvidenciaOrganizada] | None = None,
+    trechos_rotulados: Sequence[TrechoRotulado] | None = None,
+    diagnostico: DiagnosticoEstrutural | None = None,
+    origem_vinculo: str = "geracao_validada",
+) -> list[AfirmacaoVerificada]:
+    """Audita cada afirmação apenas contra os vínculos de evidência declarados."""
+    if evidencias is None:
+        return _verificar_afirmacoes_legado(cliente, rascunho, trechos, idioma)
+
+    diagnostico = diagnostico or DiagnosticoEstrutural()
+    rotulados = list(trechos_rotulados or rotular_trechos(trechos))
+    por_rotulo = {item.rotulo: item for item in rotulados}
+    por_evidencia = {item.id: item for item in evidencias}
+    verificadas: list[AfirmacaoVerificada] = []
+
+    for numero, bruto in enumerate(rascunho, start=1):
+        original = dict(bruto)
+        id_afirmacao = f"A{numero}"
+        texto = str(original.get("texto") or "").strip()
+        texto_publicado = str(
+            original.get("texto_original_publicado") or texto
+        ).strip()
+        ids_brutos = original.get("evidencia_ids")
+        evidencia_ids = tuple(
+            dict.fromkeys(
+                str(evidencia_id).strip()
+                for evidencia_id in ids_brutos
+                if str(evidencia_id).strip()
+            )
+        ) if isinstance(ids_brutos, list) else ()
+        invalidos = tuple(
+            dict.fromkeys(
+                [
+                    str(item).strip()
+                    for item in original.get("ids_evidencia_invalidos", [])
+                    if str(item).strip()
+                ]
+                + [
+                    evidencia_id
+                    for evidencia_id in evidencia_ids
+                    if evidencia_id not in por_evidencia
+                ]
+            )
+        )
+        registrado = bool(original.get("diagnostico_estrutural_registrado"))
+        if invalidos and not registrado:
+            diagnostico.evidencia_ids_invalidos_rejeitados.extend(invalidos)
+        if not evidencia_ids and not registrado:
+            diagnostico.afirmacoes_sem_evidencia += 1
+
+        selecionadas = [
+            por_evidencia[evidencia_id]
+            for evidencia_id in evidencia_ids
+            if evidencia_id in por_evidencia
+        ]
+        rotulos_associados = tuple(
+            dict.fromkeys(
+                rotulo
+                for evidencia in selecionadas
+                for rotulo in evidencia.trecho_ids
+            )
+        )
+        rotulos_invalidos = [
+            rotulo for rotulo in rotulos_associados if rotulo not in por_rotulo
+        ]
+        if rotulos_invalidos:
+            diagnostico.trecho_ids_invalidos_rejeitados.extend(rotulos_invalidos)
+
+        trechos_associados = [
+            por_rotulo[rotulo]
+            for rotulo in rotulos_associados
+            if rotulo in por_rotulo
+        ]
+        arquivos = {item.arquivo for item in trechos_associados}
+        ids_reais_por_rotulo = {
+            item.rotulo: item.id_chroma for item in trechos_associados
+        }
+        relacao_integra = all(
+            tuple(ids_reais_por_rotulo.get(rotulo, "") for rotulo in evidencia.trecho_ids)
+            == evidencia.ids_chroma
+            and all(
+                por_rotulo.get(rotulo) is not None
+                and por_rotulo[rotulo].arquivo == evidencia.arquivo
+                and por_rotulo[rotulo].pagina in evidencia.paginas
+                for rotulo in evidencia.trecho_ids
+            )
+            for evidencia in selecionadas
+        )
+        mistura_arquivos = len(arquivos) > 1 or len(
+            {item.arquivo for item in selecionadas}
+        ) > 1
+        if mistura_arquivos:
+            diagnostico.tentativas_mistura_arquivos += 1
+
+        estrutura_valida = bool(
+            texto
+            and evidencia_ids
+            and not invalidos
+            and len(selecionadas) == len(evidencia_ids)
+            and not rotulos_invalidos
+            and trechos_associados
+            and relacao_integra
+            and not mistura_arquivos
+        )
+        fontes = _fontes_evidencias(evidencia_ids, selecionadas)
+        paginas = tuple(dict.fromkeys(pagina for _, pagina in fontes))
+        natureza = str(original.get("natureza") or "texto_explicito")
+        if natureza not in {"texto_explicito", "deducao_simples"}:
+            natureza = "texto_explicito"
+        secao = str(original.get("secao") or "explicacao")
+
+        if not estrutura_valida:
+            verificadas.append(
+                AfirmacaoVerificada(
+                    texto_original=texto_publicado,
+                    texto_final="",
+                    classificacao="não sustentada",
+                    paginas=paginas,
+                    natureza=natureza,
+                    secao=secao,
+                    justificativa=(
+                        "A validação determinística rejeitou IDs ausentes, inexistentes "
+                        "ou relações inconsistentes entre evidência e trecho."
+                    ),
+                    evidencia_ids=evidencia_ids,
+                    fontes=fontes,
+                    origem_vinculo=origem_vinculo,
+                    ids_evidencia_invalidos=invalidos,
+                )
+            )
+            continue
+
+        try:
+            dados = _json_modelo(
+                cliente,
+                f"Você é um auditor factual rigoroso. Escreva exclusivamente em {idioma}. "
+                "Use somente as evidências e os trechos associados a esta afirmação. "
+                "Não crie, remova ou substitua IDs. Retorne JSON válido.",
+                f"""Classifique a afirmação como sustentada, parcialmente sustentada ou não sustentada.
+Em texto_final, remova qualquer parte sem suporte. Para não sustentada, use texto_final vazio.
+Devolva o mesmo id e exatamente os mesmos evidencia_ids. Não devolva páginas ou arquivos.
+
+Formato:
+{{"afirmacoes": [{{"id": "{id_afirmacao}", "texto_final": "...",
+"classificacao": "sustentada|parcialmente sustentada|não sustentada",
+"evidencia_ids": {json.dumps(list(evidencia_ids), ensure_ascii=False)},
+"justificativa": "..."}}]}}
+
+Afirmação:
+{json.dumps({"id": id_afirmacao, "texto": texto, "evidencia_ids": list(evidencia_ids), "natureza": natureza, "secao": secao}, ensure_ascii=False)}
+
+Evidências indicadas:
+{json.dumps([_evidencia_para_modelo(item) for item in selecionadas], ensure_ascii=False)}
+
+Trechos associados:
+{_contexto(trechos_associados)}""",
+                f"verificação factual de {id_afirmacao}",
+            )
+        except ErroConsulta:
+            verificadas.append(
+                AfirmacaoVerificada(
+                    texto_original=texto_publicado,
+                    texto_final="",
+                    classificacao="não sustentada",
+                    paginas=paginas,
+                    natureza=natureza,
+                    secao=secao,
+                    justificativa=(
+                        "O auditor auxiliar retornou estrutura inválida; a afirmação "
+                        "foi reprovada conservadoramente."
+                    ),
+                    evidencia_ids=evidencia_ids,
+                    fontes=fontes,
+                    origem_vinculo=origem_vinculo,
+                )
+            )
+            continue
+        itens_brutos = dados.get("afirmacoes")
+        if itens_brutos is None:
+            itens_brutos = dados.get("afirmações")
+        if itens_brutos is None and str(dados.get("id")) == id_afirmacao:
+            # A auditoria trata uma única afirmação. O Qwen ocasionalmente omite
+            # apenas o envelope da lista, preservando o id e evidencia_ids
+            # explícitos; aceitar esse envelope curto não cria nem completa IDs.
+            itens_brutos = [dados]
+        elif isinstance(itens_brutos, dict):
+            itens_brutos = [itens_brutos]
+        elif not isinstance(itens_brutos, list):
+            itens_brutos = []
+        itens = [
+            item
+            for item in itens_brutos
+            if isinstance(item, dict) and str(item.get("id")) == id_afirmacao
+        ]
+        auditada = itens[0] if itens else {}
+        ids_auditor_brutos = auditada.get("evidencia_ids")
+        ids_auditor = tuple(
+            dict.fromkeys(
+                str(item).strip()
+                for item in ids_auditor_brutos
+                if str(item).strip()
+            )
+        ) if isinstance(ids_auditor_brutos, list) else ()
+        adicionados = [
+            evidencia_id
+            for evidencia_id in ids_auditor
+            if evidencia_id not in evidencia_ids
+        ]
+        diagnostico.ids_adicionados_auditor_rejeitados.extend(adicionados)
+        ids_preservados = ids_auditor == evidencia_ids
+
+        classificacao = unicodedata.normalize(
+            "NFC",
+            str(auditada.get("classificacao") or "não sustentada")
+            .strip()
+            .casefold(),
+        )
+        if classificacao not in {
+            "sustentada", "parcialmente sustentada", "não sustentada"
+        }:
+            classificacao = "não sustentada"
+        texto_final = str(auditada.get("texto_final") or "").strip()
+        if not ids_preservados:
+            classificacao = "não sustentada"
+            texto_final = ""
+        elif classificacao == "sustentada" and not texto_final:
+            # Se o auditor aprovou integralmente a afirmação e preservou todos
+            # os IDs, o texto original já é a versão final auditada. Reescrita
+            # continua obrigatória para classificação parcial.
+            texto_final = texto
+        elif not texto_final:
+            classificacao = "não sustentada"
+        verificadas.append(
+            AfirmacaoVerificada(
+                texto_original=texto_publicado,
+                texto_final=texto_final if classificacao != "não sustentada" else "",
+                classificacao=classificacao,
+                paginas=paginas,
+                natureza=natureza,
+                secao=secao,
+                justificativa=(
+                    str(auditada.get("justificativa") or "").strip()
+                    if ids_preservados
+                    else "O auditor não preservou exatamente os IDs de evidência."
+                ),
+                evidencia_ids=evidencia_ids,
+                fontes=fontes,
+                origem_vinculo=origem_vinculo,
+                ids_evidencia_invalidos=invalidos,
             )
         )
     return verificadas
@@ -484,12 +917,33 @@ def montar_resposta_verificada(
     afirmacoes: Sequence[AfirmacaoVerificada],
     nivel: str,
     informacao_faltante: str = "",
+    *,
+    evidencias: Sequence[EvidenciaOrganizada] | None = None,
 ) -> tuple[str, bool]:
+    por_evidencia = {item.id: item for item in evidencias or []}
+
+    def fontes_da_afirmacao(
+        item: AfirmacaoVerificada,
+    ) -> tuple[tuple[str, int], ...]:
+        if evidencias is not None:
+            if not item.evidencia_ids or any(
+                evidencia_id not in por_evidencia
+                for evidencia_id in item.evidencia_ids
+            ):
+                return ()
+            fontes = _fontes_evidencias(item.evidencia_ids, evidencias)
+            if {fonte_arquivo for fonte_arquivo, _ in fontes} != {arquivo}:
+                return ()
+            return fontes
+        if item.fontes:
+            return item.fontes
+        return tuple((arquivo, pagina) for pagina in item.paginas)
+
     aceitas = [
-        item for item in afirmacoes
-        if item.classificacao == "sustentada"
-        and item.texto_final
-        and item.paginas
+        (item, fontes)
+        for item in afirmacoes
+        if item.classificacao == "sustentada" and item.texto_final
+        if (fontes := fontes_da_afirmacao(item))
     ]
     limite = {"Curto": 2, "Explicado": 5, "Passo a passo": 6}.get(nivel, 5)
     aceitas = aceitas[:limite]
@@ -504,20 +958,28 @@ def montar_resposta_verificada(
         )
 
     linhas = []
-    for indice, item in enumerate(aceitas, start=1):
+    for indice, (item, fontes) in enumerate(aceitas, start=1):
         rotulo = (
             "Dedução simples"
             if item.natureza == "deducao_simples"
             else "Texto explícito da fonte"
         )
         citacoes = " ".join(
-            f"[{arquivo}, página do PDF {pagina}]" for pagina in item.paginas
+            f"[{fonte_arquivo}, página do PDF {pagina}]"
+            for fonte_arquivo, pagina in fontes
         )
         prefixo = f"{indice}. " if nivel == "Passo a passo" else "- "
         linhas.append(f"{prefixo}**{rotulo}:** {item.texto_final} {citacoes}")
-    fontes = sorted({pagina for item in aceitas for pagina in item.paginas})
+    fontes = tuple(
+        dict.fromkeys(
+            fonte
+            for _, fontes_item in aceitas
+            for fonte in fontes_item
+        )
+    )
     referencias = "\n".join(
-        f"- [{arquivo}, página do PDF {pagina}]" for pagina in fontes
+        f"- [{fonte_arquivo}, página do PDF {pagina}]"
+        for fonte_arquivo, pagina in fontes
     )
     return "\n".join(linhas) + f"\n\nFontes\n{referencias}", False
 
@@ -559,6 +1021,7 @@ def consultar_fundamentado(
     colecao: object | None = None,
     modelo_embeddings: str = MODELO_EMBEDDINGS,
 ) -> ResultadoFundamentado:
+    diagnostico = DiagnosticoEstrutural()
     pergunta = pergunta.strip()
     if not pergunta:
         raise ErroConsulta("A pergunta não pode estar vazia.")
@@ -612,12 +1075,13 @@ def consultar_fundamentado(
         trechos_fracos = selecionar_evidencias(
             ranking_documento, minimo=1, maximo=4
         )
+        rotulados_fracos = rotular_trechos(trechos_fracos)
         faltando = (
             "faltam no PDF os conceitos centrais da pergunta; a semelhança vetorial "
             "isolada não é evidência suficiente."
         )
         resposta, _ = montar_resposta_verificada(
-            documento, [], nivel_detalhe, faltando
+            documento, [], nivel_detalhe, faltando, evidencias=[]
         )
         return ResultadoFundamentado(
             documento=documento,
@@ -628,6 +1092,8 @@ def consultar_fundamentado(
             resposta=resposta,
             insuficiente=True,
             informacao_faltante=faltando,
+            trechos_rotulados=tuple(rotulados_fracos),
+            diagnostico_estrutural=diagnostico,
         )
     # Reserva duas vagas para continuações em páginas adjacentes.
     trechos = selecionar_evidencias(ranking_documento, minimo=3, maximo=4)
@@ -638,11 +1104,18 @@ def consultar_fundamentado(
     trechos = remover_quase_duplicados(trechos)[:6]
     if not trechos:
         raise ErroConsulta("Não encontrei evidências suficientemente fortes no PDF escolhido.")
+    trechos_rotulados = rotular_trechos(trechos)
 
-    evidencias, suficiente, faltando = organizar_evidencias(cliente, pergunta, trechos)
+    evidencias, suficiente, faltando = organizar_evidencias(
+        cliente,
+        pergunta,
+        trechos,
+        trechos_rotulados=trechos_rotulados,
+        diagnostico=diagnostico,
+    )
     if not suficiente:
         resposta, _ = montar_resposta_verificada(
-            documento, [], nivel_detalhe, faltando
+            documento, [], nivel_detalhe, faltando, evidencias=evidencias
         )
         return ResultadoFundamentado(
             documento=documento,
@@ -653,11 +1126,26 @@ def consultar_fundamentado(
             resposta=resposta,
             insuficiente=True,
             informacao_faltante=faltando,
+            trechos_rotulados=tuple(trechos_rotulados),
+            diagnostico_estrutural=diagnostico,
         )
     rascunho = redigir_rascunho(
-        cliente, pergunta, evidencias, idioma, nivel_detalhe
+        cliente,
+        pergunta,
+        evidencias,
+        idioma,
+        nivel_detalhe,
+        diagnostico=diagnostico,
     )
-    afirmacoes = verificar_afirmacoes(cliente, rascunho, trechos, idioma)
+    afirmacoes = verificar_afirmacoes(
+        cliente,
+        rascunho,
+        trechos,
+        idioma,
+        evidencias=evidencias,
+        trechos_rotulados=trechos_rotulados,
+        diagnostico=diagnostico,
+    )
     if not any(
         item.classificacao in {"sustentada", "parcialmente sustentada"}
         and item.texto_final
@@ -672,8 +1160,17 @@ def consultar_fundamentado(
             idioma,
             "Curto",
             conservador=True,
+            diagnostico=diagnostico,
         )
-        afirmacoes = verificar_afirmacoes(cliente, rascunho, trechos, idioma)
+        afirmacoes = verificar_afirmacoes(
+            cliente,
+            rascunho,
+            trechos,
+            idioma,
+            evidencias=evidencias,
+            trechos_rotulados=trechos_rotulados,
+            diagnostico=diagnostico,
+        )
     afirmacoes = [
         replace(
             item,
@@ -684,7 +1181,11 @@ def consultar_fundamentado(
         for item in afirmacoes
     ]
     resposta, insuficiente = montar_resposta_verificada(
-        documento, afirmacoes, nivel_detalhe, faltando
+        documento,
+        afirmacoes,
+        nivel_detalhe,
+        faltando,
+        evidencias=evidencias,
     )
     if not resposta_no_idioma(resposta, idioma):
         raise ErroConsulta(
@@ -699,4 +1200,6 @@ def consultar_fundamentado(
         resposta=resposta,
         insuficiente=insuficiente,
         informacao_faltante=faltando,
+        trechos_rotulados=tuple(trechos_rotulados),
+        diagnostico_estrutural=diagnostico,
     )
