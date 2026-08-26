@@ -584,6 +584,21 @@ def avaliar_rastreabilidade_estrutural(
             "paginas_citadas_por_afirmacao": None,
         }
 
+    if not espera_resposta:
+        return {
+            "origem_vinculos": "ids_usados_na_geracao",
+            "afirmacoes_com_evidencia_valida": None,
+            "evidencias_com_trechos_validos": None,
+            "citacoes_derivadas_evidencias": None,
+            "cobertura_evidencias_afirmacoes": None,
+            "tentativas_evidencia_inexistente": None,
+            "tentativas_trecho_inexistente": None,
+            "tentativas_mistura_arquivos": None,
+            "afirmacoes_publicadas_sem_evidencia": None,
+            "trechos_suporte_por_afirmacao": None,
+            "paginas_citadas_por_afirmacao": None,
+        }
+
     diagnostico = diagnostico or DiagnosticoEstrutural()
     por_rotulo = {item.rotulo: item for item in trechos_rotulados}
     por_evidencia = {item.id: item for item in evidencias}

@@ -326,6 +326,35 @@ def test_recusa_sem_citacao_nao_falha_metrica_de_citacao():
     assert resultado.citacao_formal_valida is None
 
 
+def test_recusa_fundamentada_torna_metricas_estruturais_nao_aplicaveis():
+    caso = caso_resposta() | {
+        "paginas_esperadas": [],
+        "conceitos_esperados": [],
+        "espera_recusa": True,
+    }
+    diagnostico = DiagnosticoEstrutural(
+        trecho_ids_invalidos_rejeitados=["T99"],
+        evidencia_ids_invalidos_rejeitados=["E99"],
+    )
+
+    resultado = avaliar_estruturado(
+        caso=caso,
+        resposta="Não encontrei evidência suficiente no material para responder.",
+        afirmacoes=[],
+        afirmacoes_geracao=[],
+        insuficiente=True,
+        diagnostico_estrutural=diagnostico,
+    )
+
+    assert resultado.recusa_correta is True
+    assert resultado.afirmacoes_com_evidencia_valida is None
+    assert resultado.evidencias_com_trechos_validos is None
+    assert resultado.citacoes_derivadas_evidencias is None
+    assert resultado.tentativas_evidencia_inexistente is None
+    assert resultado.tentativas_trecho_inexistente is None
+    assert resultado.trechos_suporte_por_afirmacao is None
+
+
 def test_idioma_portugues_curto():
     assert avaliar_idioma("Sinal periódico.", "Português") is True
 
