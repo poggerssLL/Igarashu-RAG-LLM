@@ -254,17 +254,25 @@ e continuação em página vizinha.
 .\.venv\Scripts\python.exe -m src.evaluate --geracao
 ```
 
-Para medir também o fluxo anterior e atualizar
-`avaliacao/linha_base_geracao.json`:
+Para medir também o fluxo anterior e gerar uma nova linha de base corrigida:
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.evaluate --geracao --comparar-compatibilidade
 ```
 
-As métricas são calculadas separadamente para página correta, conceitos, validade das
-citações, idioma, recusa correta e afirmações não sustentadas. Essa avaliação chama o
-Qwen várias vezes e pode demorar alguns minutos; ela é separada da avaliação rápida de
-recuperação na interface.
+O arquivo antigo `avaliacao/linha_base_geracao.json` pertence ao esquema anterior e é
+preservado sem sobrescrita; seus números não são diretamente comparáveis aos resultados
+novos. Cada execução corrigida cria um JSON com timestamp UTC em
+`avaliacao/resultados/`, sem substituir execuções anteriores.
+
+As métricas determinísticas registram arquivo, página, combinação arquivo/página,
+conceitos, formato e pertencimento das citações, idioma, presença de resposta e recusa.
+Valores não aplicáveis ficam como `null` e não entram no denominador. A relação semântica
+entre afirmação, citação e trecho é auditada pelo Qwen e aparece separadamente como
+**métrica auxiliar não independente**. Quando o mesmo `qwen2.5:3b` gera e audita, o
+relatório registra `avaliacao_independente: false`; essa auditoria não substitui gabarito
+ou revisão humana. A execução pode demorar alguns minutos e permanece separada da
+avaliação rápida de recuperação na interface.
 
 ## Interface local
 

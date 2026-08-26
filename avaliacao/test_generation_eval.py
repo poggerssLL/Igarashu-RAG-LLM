@@ -1,0 +1,325 @@
+import json
+from datetime import datetime, timezone
+
+import pytest
+
+from src.chat import TrechoRecuperado
+from src.generation_eval import (
+    auditar_resposta_publicada,
+    avaliar_idioma,
+    avaliar_saida,
+    metadados_auditoria,
+    resumo_metricas,
+    salvar_resultados_detalhados,
+)
+from src.grounded import AfirmacaoVerificada
+
+
+ARQUIVO = "Sinais e Sistemas/Livro.pdf"
+
+
+def trecho(arquivo: str = ARQUIVO, pagina: int = 42) -> TrechoRecuperado:
+    return TrechoRecuperado(
+        texto="A periodic signal repeats after a period T.",
+        arquivo=arquivo,
+        pagina=pagina,
+        indice=0,
+        id=f"{arquivo}:{pagina}",
+    )
+
+
+def afirmacao(
+    classificacao: str = "sustentada",
+    *,
+    pagina: int = 42,
+    arquivo: str = ARQUIVO,
+) -> AfirmacaoVerificada:
+    original = (
+        "Um sinal periódico se repete após um período. "
+        f"[{arquivo}, página do PDF {pagina}]"
+    )
+    final = (
+        "Um sinal periódico se repete após um período."
+        if classificacao != "não sustentada"
+        else ""
+    )
+    return AfirmacaoVerificada(
+        texto_original=original,
+        texto_final=final,
+        classificacao=classificacao,
+        paginas=(pagina,),
+        natureza="texto_explicito",
+        secao="resposta_publicada",
+        justificativa="Classificação simulada para o teste.",
+    )
+
+
+def caso_resposta() -> dict:
+    return {
+        "tipo": "resposta direta",
+        "pergunta": "O que é um sinal periódico?",
+        "arquivo": ARQUIVO,
+        "paginas_esperadas": [42],
+        "conceitos_esperados": ["periódico"],
+        "idioma": "Português",
+        "espera_recusa": False,
+        "observacao": "caso sintético",
+    }
+
+
+def resposta_citada(arquivo: str = ARQUIVO, pagina: int = 42) -> str:
+    return (
+        "Um sinal periódico se repete após um período. "
+        f"[{arquivo}, página do PDF {pagina}]\n\n"
+        f"Fontes\n- [{arquivo}, página do PDF {pagina}]"
+    )
+
+
+def avaliar(
+    *,
+    modo: str = "fundamentado",
+    trechos=None,
+    resposta: str | None = None,
+    afirmacoes=None,
+    caso=None,
+    insuficiente: bool = False,
+):
+    return avaliar_saida(
+        caso or caso_resposta(),
+        modo,
+        trechos or [trecho()],
+        resposta or resposta_citada(),
+        ARQUIVO,
+        afirmacoes if afirmacoes is not None else [afirmacao()],
+        insuficiente,
+    )
+
+
+def test_fundamentado_conta_afirmacao_insegura_publicada():
+    resultado = avaliar(afirmacoes=[afirmacao("não sustentada")])
+    assert resultado.nao_sustentadas_publicadas == 1
+
+
+def test_compatibilidade_conta_afirmacao_insegura_publicada():
+    resultado = avaliar(
+        modo="compatibilidade", afirmacoes=[afirmacao("não sustentada")]
+    )
+    assert resultado.nao_sustentadas_publicadas == 1
+
+
+def test_afirmacao_parcial_publicada_continua_insegura():
+    resultado = avaliar(afirmacoes=[afirmacao("parcialmente sustentada")])
+    assert resultado.parcialmente_sustentadas_detectadas == 1
+    assert resultado.nao_sustentadas_publicadas == 1
+
+
+def test_resposta_final_sem_afirmacoes_inseguras():
+    resultado = avaliar(afirmacoes=[afirmacao("sustentada")])
+    assert resultado.nao_sustentadas_publicadas == 0
+
+
+def test_pagina_certa_no_arquivo_errado_nao_e_fonte_correta():
+    resultado = avaliar(
+        trechos=[trecho("Outro.pdf", 42)],
+        resposta=resposta_citada("Outro.pdf", 42),
+        afirmacoes=[afirmacao(arquivo="Outro.pdf")],
+    )
+    assert resultado.pagina_correta is True
+    assert resultado.arquivo_correto is False
+    assert resultado.fonte_correta is False
+
+
+def test_arquivo_certo_na_pagina_errada_nao_e_fonte_correta():
+    resultado = avaliar(
+        trechos=[trecho(ARQUIVO, 41)],
+        resposta=resposta_citada(ARQUIVO, 41),
+        afirmacoes=[afirmacao(pagina=41)],
+    )
+    assert resultado.arquivo_correto is True
+    assert resultado.pagina_correta is False
+    assert resultado.fonte_correta is False
+
+
+def test_arquivo_e_pagina_corretos_formam_fonte_correta():
+    resultado = avaliar()
+    assert resultado.arquivo_correto is True
+    assert resultado.pagina_correta is True
+    assert resultado.fonte_correta is True
+
+
+def test_recusa_torna_paginas_conceitos_e_citacoes_nao_aplicaveis():
+    caso = caso_resposta() | {
+        "paginas_esperadas": [],
+        "conceitos_esperados": [],
+        "espera_recusa": True,
+    }
+    resultado = avaliar(
+        caso=caso,
+        resposta="Não encontrei evidência suficiente no material para responder.",
+        afirmacoes=[],
+        insuficiente=True,
+    )
+    assert resultado.arquivo_correto is None
+    assert resultado.pagina_correta is None
+    assert resultado.fonte_correta is None
+    assert resultado.conceitos_presentes is None
+    assert resultado.citacao_formal_valida is None
+    assert resultado.citacao_recuperada is None
+    assert resultado.recusa_correta is True
+
+
+def test_agregado_ignora_nao_aplicavel_no_denominador():
+    resposta = avaliar()
+    caso_recusa = caso_resposta() | {
+        "paginas_esperadas": [],
+        "conceitos_esperados": [],
+        "espera_recusa": True,
+    }
+    recusa = avaliar(
+        caso=caso_recusa,
+        resposta="Não encontrei evidência suficiente para responder.",
+        afirmacoes=[],
+        insuficiente=True,
+    )
+    metrica = resumo_metricas([resposta, recusa])["metricas_deterministicas"][
+        "pagina_correta"
+    ]
+    assert metrica == {"acertos": 1, "aplicaveis": 1, "taxa": 1.0}
+
+
+def test_citacao_formalmente_invalida():
+    resultado = avaliar(
+        resposta="Um sinal periódico se repete. [Sinais e Sistemas/Livro.pdf, p. 42]",
+        afirmacoes=[afirmacao()],
+    )
+    assert resultado.citacao_formal_valida is False
+
+
+def test_citacao_valida_mas_nao_recuperada():
+    resultado = avaliar(
+        trechos=[trecho(ARQUIVO, 42)],
+        resposta=resposta_citada(ARQUIVO, 43),
+        afirmacoes=[afirmacao(pagina=43)],
+    )
+    assert resultado.citacao_formal_valida is True
+    assert resultado.citacao_recuperada is False
+
+
+def test_recusa_sem_citacao_nao_falha_metrica_de_citacao():
+    caso = caso_resposta() | {
+        "paginas_esperadas": [],
+        "conceitos_esperados": [],
+        "espera_recusa": True,
+    }
+    resultado = avaliar(
+        caso=caso,
+        resposta="Não encontrei a resposta no material indexado.",
+        afirmacoes=[],
+        insuficiente=True,
+    )
+    assert resultado.citacoes == ()
+    assert resultado.citacao_formal_valida is None
+
+
+def test_idioma_portugues_curto():
+    assert avaliar_idioma("Sinal periódico.", "Português") is True
+
+
+def test_idioma_ingles_curto():
+    assert avaliar_idioma("Periodic signal.", "English") is True
+
+
+def test_recusa_em_portugues_e_identificada():
+    texto = "Não encontrei evidência suficiente para responder."
+    assert avaliar_idioma(texto, "Português") is True
+
+
+def test_recusa_em_ingles_e_identificada():
+    texto = "I could not find sufficient evidence to answer."
+    assert avaliar_idioma(texto, "English") is True
+
+
+def test_idioma_de_formula_isolada_e_indeterminado():
+    assert avaliar_idioma("x(t) = x(t + T)", "Português") is None
+
+
+def test_serializacao_do_relatorio_detalhado(tmp_path):
+    destino = salvar_resultados_detalhados(
+        [avaliar()],
+        modo="fundamentado",
+        diretorio=tmp_path,
+        data_utc=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
+    )
+    dados = json.loads(destino.read_text(encoding="utf-8"))
+    assert dados["versao_esquema"] == "2.0"
+    assert dados["ambiente"]["sistema_operacional"]
+    assert dados["modelos"]["avaliacao_independente"] is False
+    assert dados["casos"][0]["resposta_final"] == resposta_citada()
+    assert "C:\\Users\\erick" not in destino.read_text(encoding="utf-8")
+
+
+def test_salvamento_preserva_resultado_anterior(tmp_path):
+    momento = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
+    primeiro = salvar_resultados_detalhados(
+        [avaliar()], modo="fundamentado", diretorio=tmp_path, data_utc=momento
+    )
+    conteudo_original = primeiro.read_bytes()
+    segundo = salvar_resultados_detalhados(
+        [avaliar()], modo="fundamentado", diretorio=tmp_path, data_utc=momento
+    )
+    assert segundo != primeiro
+    assert primeiro.read_bytes() == conteudo_original
+
+
+def test_gerador_e_auditor_iguais_nao_sao_avaliacao_independente():
+    metadados = metadados_auditoria("qwen2.5:3b", "qwen2.5:3b")
+    assert metadados["gerador_e_auditor_iguais"] is True
+    assert metadados["avaliacao_independente"] is False
+
+
+def test_auditoria_comum_usa_resposta_publicada_sem_secao_fontes(monkeypatch):
+    capturado = {}
+
+    def auditor_simulado(cliente, rascunho, trechos, idioma):
+        capturado["rascunho"] = rascunho
+        return [afirmacao()]
+
+    monkeypatch.setattr(
+        "src.generation_eval.verificar_afirmacoes", auditor_simulado
+    )
+    resultado = auditar_resposta_publicada(
+        object(), resposta_citada(), [trecho()], "Português"
+    )
+    assert len(resultado) == 1
+    assert len(capturado["rascunho"]) == 1
+    assert "Fontes" not in capturado["rascunho"][0]["texto"]
+
+
+def test_recusa_publicada_e_registrada_mas_nao_auditada_como_fato(monkeypatch):
+    chamado = False
+
+    def auditor_simulado(*args, **kwargs):
+        nonlocal chamado
+        chamado = True
+        return []
+
+    monkeypatch.setattr(
+        "src.generation_eval.verificar_afirmacoes", auditor_simulado
+    )
+    resposta = "Não encontrei evidência suficiente no PDF para responder."
+    auditadas = auditar_resposta_publicada(
+        object(), resposta, [trecho()], "Português"
+    )
+    resultado = avaliar(
+        caso=caso_resposta() | {
+            "paginas_esperadas": [],
+            "conceitos_esperados": [],
+            "espera_recusa": True,
+        },
+        resposta=resposta,
+        afirmacoes=auditadas,
+        insuficiente=True,
+    )
+    assert chamado is False
+    assert resultado.afirmacoes_publicadas == (resposta,)
+    assert resultado.nao_sustentadas_publicadas == 0

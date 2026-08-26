@@ -639,28 +639,37 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
 
     with aba_geracao:
         st.caption(
-            "Executa sete casos reais. Como cada resposta é organizada e auditada localmente, "
-            "esta avaliação pode levar alguns minutos."
+            "Executa sete casos reais e audita a resposta final publicada. A auditoria semântica "
+            "usa o mesmo Qwen e é auxiliar, não uma validação independente."
         )
         comparar = st.checkbox(
-            "Executar também o modo Compatibilidade e atualizar a linha de base",
+            "Executar também o modo Compatibilidade e gerar nova linha de base corrigida",
             value=False,
             key="comparar_geracao",
         )
         if st.button("Executar avaliação da geração", type="primary"):
             try:
                 from src.generation_eval import (
+                    carregar_casos_geracao,
                     executar_avaliacao_geracao,
+                    resultado_aprovado,
                     resumo_metricas,
                     salvar_linha_base,
                 )
 
                 with st.spinner("Gerando e auditando respostas localmente..."):
+                    casos_geracao = carregar_casos_geracao()
                     anteriores = None
                     if comparar:
-                        anteriores = executar_avaliacao_geracao("compatibilidade")
+                        anteriores = executar_avaliacao_geracao(
+                            "compatibilidade",
+                            casos_geracao,
+                            salvar_resultado=False,
+                        )
                         salvar_linha_base(anteriores)
-                    atuais = executar_avaliacao_geracao("fundamentado")
+                    atuais = executar_avaliacao_geracao(
+                        "fundamentado", casos_geracao
+                    )
                     st.session_state["ultima_avaliacao_geracao"] = (
                         resumo_metricas(anteriores or []),
                         resumo_metricas(atuais),
@@ -674,28 +683,52 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
             st.info("Execute a avaliação para medir a confiabilidade da resposta final.")
         else:
             base, metricas, resultados = dados_geracao
+            deterministicas = metricas["metricas_deterministicas"]
+            auxiliares = metricas["metricas_auxiliares_qwen"]
+
+            def exibir_contagem(metrica: dict) -> str:
+                aplicaveis = int(metrica.get("aplicaveis") or 0)
+                if not aplicaveis:
+                    return "N/A"
+                acertos = int(metrica.get("acertos") or 0)
+                return f"{acertos}/{aplicaveis} · {acertos / aplicaveis:.0%}"
+
             colunas = st.columns(3)
-            colunas[0].metric("Página correta", f"{metricas['recuperacao_pagina']:.1%}")
-            colunas[1].metric("Citações válidas", f"{metricas['citacoes']:.1%}")
-            colunas[2].metric("Idioma correto", f"{metricas['idioma']:.1%}")
+            colunas[0].metric(
+                "Página correta", exibir_contagem(deterministicas["pagina_correta"])
+            )
+            colunas[1].metric(
+                "Fonte correta", exibir_contagem(deterministicas["fonte_correta"])
+            )
+            colunas[2].metric(
+                "Citação recuperada",
+                exibir_contagem(deterministicas["citacao_recuperada"]),
+            )
             colunas = st.columns(3)
-            colunas[0].metric("Conceitos", f"{metricas['conceitos']:.1%}")
-            colunas[1].metric("Recusa correta", f"{metricas['recusa']:.1%}")
+            colunas[0].metric(
+                "Conceitos", exibir_contagem(deterministicas["conceitos_presentes"])
+            )
+            colunas[1].metric(
+                "Recusa correta", exibir_contagem(deterministicas["recusa_correta"])
+            )
             colunas[2].metric(
                 "Sem afirmação insegura",
-                f"{metricas['casos_sem_afirmacao_publicada_nao_sustentada']:.1%}",
+                exibir_contagem(
+                    auxiliares["casos_sem_afirmacao_publicada_insegura"]
+                ),
             )
             if base.get("casos"):
+                det_base = base["metricas_deterministicas"]
+                aux_base = base["metricas_auxiliares_qwen"]
                 st.caption(
-                    f"Linha de base: citações {base['citacoes']:.1%}, recusas {base['recusa']:.1%}, "
-                    f"casos sem afirmação insegura {base['casos_sem_afirmacao_publicada_nao_sustentada']:.1%}."
+                    "Linha de base corrigida: fonte "
+                    f"{exibir_contagem(det_base['fonte_correta'])}, recusas "
+                    f"{exibir_contagem(det_base['recusa_correta'])}, casos sem afirmação "
+                    f"insegura {exibir_contagem(aux_base['casos_sem_afirmacao_publicada_insegura'])}."
                 )
+            st.caption(auxiliares["aviso"])
             for item in resultados:
-                falhou = not all((
-                    item.recuperou_pagina, item.conceitos_presentes,
-                    item.citacoes_validas, item.idioma_correto,
-                    item.recusa_correta, item.nao_sustentadas_publicadas == 0,
-                ))
+                falhou = not resultado_aprovado(item)
                 if falhou:
                     with st.expander(f"Atenção · {item.pergunta}"):
                         st.write(f"Documento: {item.documento}")

@@ -205,41 +205,60 @@ def main() -> int:
     try:
         if args.geracao:
             from .generation_eval import (
+                carregar_casos_geracao,
                 executar_avaliacao_geracao,
+                formatar_metrica_agregada,
+                resultado_aprovado,
                 resumo_metricas,
                 salvar_linha_base,
             )
 
-            if args.comparar_compatibilidade:
-                print("Executando linha de base (modo Compatibilidade)...")
-                anteriores = executar_avaliacao_geracao("compatibilidade")
-                salvar_linha_base(anteriores)
-                print("Linha de base:")
-                for chave, valor in resumo_metricas(anteriores).items():
-                    print(f"  {chave}: {valor:.1%}" if isinstance(valor, float) else f"  {chave}: {valor}")
-                print()
-            print("Executando modo Fundamentado...")
-            novos = executar_avaliacao_geracao("fundamentado")
-            print("Resultado fundamentado:")
-            for chave, valor in resumo_metricas(novos).items():
-                print(f"  {chave}: {valor:.1%}" if isinstance(valor, float) else f"  {chave}: {valor}")
-            print("\nDetalhes por caso:")
-            for indice, item in enumerate(novos, start=1):
-                estado = all(
-                    (
-                        item.recuperou_pagina,
-                        item.conceitos_presentes,
-                        item.citacoes_validas,
-                        item.idioma_correto,
-                        item.recusa_correta,
-                        item.nao_sustentadas_publicadas == 0,
+            casos_geracao = carregar_casos_geracao()
+
+            def imprimir_resumo_geracao(titulo: str, resultados: Sequence) -> None:
+                metricas = resumo_metricas(resultados)
+                print(titulo)
+                print("  Métricas determinísticas:")
+                for chave, metrica in metricas["metricas_deterministicas"].items():
+                    print(f"    {chave}: {formatar_metrica_agregada(metrica)}")
+                auxiliares = metricas["metricas_auxiliares_qwen"]
+                print("  Métricas auxiliares pelo Qwen (não independentes):")
+                print(
+                    "    citacao_sustenta_afirmacao: "
+                    + formatar_metrica_agregada(
+                        auxiliares["citacao_sustenta_afirmacao"]
                     )
                 )
                 print(
+                    "    afirmações inseguras publicadas: "
+                    f"{auxiliares['afirmacoes_inseguras_publicadas']}"
+                )
+                print(f"    aviso: {auxiliares['aviso']}")
+
+            if args.comparar_compatibilidade:
+                print("Executando nova linha de base (modo Compatibilidade)...")
+                anteriores = executar_avaliacao_geracao(
+                    "compatibilidade", casos_geracao, salvar_resultado=False
+                )
+                caminho_base = salvar_linha_base(anteriores)
+                imprimir_resumo_geracao("Linha de base corrigida:", anteriores)
+                print(f"  relatório: {caminho_base.relative_to(RAIZ_PROJETO)}")
+                print()
+            print("Executando modo Fundamentado...")
+            novos = executar_avaliacao_geracao("fundamentado", casos_geracao)
+            imprimir_resumo_geracao("Resultado fundamentado:", novos)
+            if novos.relatorio:
+                print(f"  relatório: {novos.relatorio.relative_to(RAIZ_PROJETO)}")
+            print("\nDetalhes por caso:")
+            for indice, item in enumerate(novos, start=1):
+                estado = resultado_aprovado(item)
+                print(
                     f"{indice}. {'OK' if estado else 'ATENÇÃO'} | {item.pergunta}\n"
                     f"   páginas={list(item.paginas_retornadas)} | documento={item.documento}\n"
-                    f"   recuperação={item.recuperou_pagina} conceitos={item.conceitos_presentes} "
-                    f"citações={item.citacoes_validas} idioma={item.idioma_correto} "
+                    f"   arquivo={item.arquivo_correto} página={item.pagina_correta} "
+                    f"fonte={item.fonte_correta} conceitos={item.conceitos_presentes} "
+                    f"citação_formal={item.citacao_formal_valida} "
+                    f"citação_recuperada={item.citacao_recuperada} idioma={item.idioma_correto} "
                     f"recusa={item.recusa_correta} não_sustentadas_publicadas={item.nao_sustentadas_publicadas}"
                 )
             return 0

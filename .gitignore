@@ -79,3 +79,5 @@ models/
 # Saídas geradas pelas avaliações (podem conter respostas derivadas dos PDFs)
 avaliacao/linha_base_geracao.json
 avaliacao/resultado_fundamentado.json
+avaliacao/resultados/*.json
+!avaliacao/resultados/.gitkeep
