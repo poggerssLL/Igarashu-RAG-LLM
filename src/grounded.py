@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from dataclasses import dataclass, field, replace
 from typing import Sequence
@@ -19,6 +20,7 @@ from .chat import (
     manifesto_compativel,
     normalizar_termos,
     recuperar_trechos,
+    remover_secao_fontes,
     resposta_no_idioma,
     termos_consulta,
     verificar_ollama_e_modelos,
@@ -28,6 +30,9 @@ from .config import MINIMO_CANDIDATOS, MODELO_CONVERSA, MODELO_EMBEDDINGS, OLLAM
 
 NIVEIS_DETALHE = ("Curto", "Explicado", "Passo a passo")
 MODO_AUTOMATICO = "Automático"
+_PADRAO_REFERENCIA_PUBLICADA = re.compile(
+    r"\[[^\]\n]+,\s*página do PDF\s+\d+\]", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -1049,6 +1054,13 @@ def traduzir_afirmacao(cliente: Client, texto: str, idioma: str) -> str:
     return traducao if resposta_no_idioma(traducao, idioma) else ""
 
 
+def resposta_verificada_no_idioma(resposta: str, idioma: str) -> bool:
+    """Ignora nomes de arquivos nas referências ao validar o idioma da prosa."""
+    corpo = remover_secao_fontes(resposta)
+    corpo = _PADRAO_REFERENCIA_PUBLICADA.sub(" ", corpo)
+    return resposta_no_idioma(corpo, idioma)
+
+
 def consultar_fundamentado(
     pergunta: str,
     *,
@@ -1228,7 +1240,7 @@ def consultar_fundamentado(
         faltando,
         evidencias=evidencias,
     )
-    if not resposta_no_idioma(resposta, idioma):
+    if not resposta_verificada_no_idioma(resposta, idioma):
         raise ErroConsulta(
             f"A resposta verificada não respeitou o idioma selecionado ({idioma})."
         )

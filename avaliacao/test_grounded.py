@@ -13,6 +13,7 @@ from src.grounded import (
     redigir_rascunho,
     remover_quase_duplicados,
     rotular_trechos,
+    resposta_verificada_no_idioma,
     selecionar_evidencias,
     selecionar_fonte,
     verificar_afirmacoes,
@@ -146,6 +147,16 @@ def test_ids_tn_apontam_para_ids_reais_e_metadados_dos_trechos():
         42,
         3,
     )
+
+
+def test_validacao_de_idioma_ignora_nome_ingles_do_pdf_nas_citacoes():
+    resposta = (
+        "x(t) = x(t + T) "
+        "[Signals_and_Systems.pdf, página do PDF 42]\n\n"
+        "Fontes\n- [Signals_and_Systems.pdf, página do PDF 42]"
+    )
+
+    assert resposta_verificada_no_idioma(resposta, "Português") is True
 
 
 def test_dois_trechos_na_mesma_pagina_recebem_rotulos_distintos():
