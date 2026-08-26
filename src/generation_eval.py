@@ -38,7 +38,7 @@ from .index_manifest import carregar_manifesto
 ARQUIVO_CASOS_GERACAO = RAIZ_PROJETO / "avaliacao" / "casos_geracao.json"
 ARQUIVO_LINHA_BASE = RAIZ_PROJETO / "avaliacao" / "linha_base_geracao.json"
 PASTA_RESULTADOS_GERACAO = RAIZ_PROJETO / "avaliacao" / "resultados"
-VERSAO_ESQUEMA_AVALIACAO = "2.0"
+VERSAO_ESQUEMA_AVALIACAO = "2.1"
 AVISO_AUDITORIA_QWEN = (
     "A auditoria semântica é uma métrica auxiliar produzida por um LLM local. "
     "Ela não é uma validação independente e não substitui gabarito ou revisão humana."
@@ -101,11 +101,22 @@ class ResultadoGeracao:
     tentativas_trecho_inexistente: int | None = None
     tentativas_mistura_arquivos: int | None = None
     afirmacoes_publicadas_sem_evidencia: int | None = None
+    arquivo_recuperado: bool | None = None
+    pagina_recuperada: bool | None = None
+    fonte_recuperada: bool | None = None
+    citacao_pagina_esperada: bool | None = None
+    citacao_fonte_esperada: bool | None = None
+    citacoes_inline: tuple[tuple[str, int], ...] = ()
+    citacoes_bibliografia: tuple[tuple[str, int], ...] = ()
+    quantidade_citacoes_unicas: int | None = None
+    citacoes_duplicadas_removidas: int | None = None
+    trechos_suporte_por_afirmacao: tuple[int, ...] | None = None
+    paginas_citadas_por_afirmacao: tuple[int, ...] | None = None
 
     @property
     def recuperou_pagina(self) -> bool | None:
         """Alias legado para consumidores antigos da avaliação."""
-        return self.pagina_correta
+        return self.pagina_recuperada
 
     @property
     def citacoes_validas(self) -> bool | None:
@@ -117,12 +128,18 @@ class ResultadoGeracao:
     @property
     def metricas_deterministicas(self) -> dict[str, bool | None]:
         return {
+            "arquivo_recuperado": self.arquivo_recuperado,
+            "pagina_recuperada": self.pagina_recuperada,
+            "fonte_recuperada": self.fonte_recuperada,
+            "citacao_pagina_esperada": self.citacao_pagina_esperada,
+            "citacao_fonte_esperada": self.citacao_fonte_esperada,
             "arquivo_correto": self.arquivo_correto,
             "pagina_correta": self.pagina_correta,
             "fonte_correta": self.fonte_correta,
             "conceitos_presentes": self.conceitos_presentes,
             "citacao_formal_valida": self.citacao_formal_valida,
             "citacao_recuperada": self.citacao_recuperada,
+            "citacoes_validas": self.citacoes_validas,
             "recusa_correta": self.recusa_correta,
             "idioma_correto": self.idioma_correto,
             "resposta_presente": self.resposta_presente,
@@ -140,6 +157,18 @@ class ResultadoGeracao:
             "tentativas_trecho_inexistente": self.tentativas_trecho_inexistente,
             "tentativas_mistura_arquivos": self.tentativas_mistura_arquivos,
             "afirmacoes_publicadas_sem_evidencia": self.afirmacoes_publicadas_sem_evidencia,
+            "quantidade_citacoes_unicas": self.quantidade_citacoes_unicas,
+            "citacoes_duplicadas_removidas": self.citacoes_duplicadas_removidas,
+            "trechos_suporte_por_afirmacao": (
+                list(self.trechos_suporte_por_afirmacao)
+                if self.trechos_suporte_por_afirmacao is not None
+                else None
+            ),
+            "paginas_citadas_por_afirmacao": (
+                list(self.paginas_citadas_por_afirmacao)
+                if self.paginas_citadas_por_afirmacao is not None
+                else None
+            ),
             "ids_rejeitados": self.diagnostico_estrutural.como_dict(),
         }
 
@@ -174,6 +203,17 @@ class ResultadosGeracao(list[ResultadoGeracao]):
         self.relatorio = relatorio
 
 
+@dataclass(frozen=True)
+class AnaliseCitacoes:
+    formal_valida: bool | None
+    pertencem_recuperacao: bool | None
+    ocorrencias: tuple[tuple[str, int], ...]
+    unicas: tuple[tuple[str, int], ...]
+    inline: tuple[tuple[str, int], ...]
+    bibliografia: tuple[tuple[str, int], ...]
+    duplicadas_removidas: int
+
+
 def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", texto.casefold())
     texto = "".join(item for item in texto if not unicodedata.combining(item))
@@ -182,6 +222,62 @@ def normalizar(texto: str) -> str:
 
 def normalizar_caminho(caminho: str) -> str:
     return caminho.strip().replace("\\", "/").casefold()
+
+
+def _normalizar_decimal_textual(texto: str) -> str:
+    return re.sub(r"(?<=\d),(?=\d)", ".", normalizar(texto))
+
+
+def _alternativa_presente(texto: str, alternativa: object) -> bool:
+    texto_normalizado = _normalizar_decimal_textual(texto)
+    if isinstance(alternativa, str):
+        return _normalizar_decimal_textual(alternativa) in texto_normalizado
+    if not isinstance(alternativa, dict):
+        return False
+    if alternativa.get("texto") is not None:
+        return _normalizar_decimal_textual(str(alternativa["texto"])) in texto_normalizado
+    try:
+        esperado = float(str(alternativa["valor"]).replace(",", "."))
+        tolerancia = float(
+            str(alternativa.get("tolerancia", 0.0)).replace(",", ".")
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    unidade = str(alternativa.get("unidade") or "").strip()
+    if not unidade or tolerancia < 0:
+        return False
+    unidade_padrao = re.escape(_normalizar_decimal_textual(unidade)).replace(
+        r"\ ", r"\s*"
+    )
+    padrao = re.compile(
+        rf"(?<![\w.,])([+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*{unidade_padrao}(?!\w)",
+        re.IGNORECASE,
+    )
+    for encontrado in padrao.finditer(texto_normalizado):
+        try:
+            valor = float(encontrado.group(1))
+        except ValueError:
+            continue
+        if abs(valor - esperado) <= tolerancia:
+            return True
+    return False
+
+
+def avaliar_conceitos(texto: str, conceitos: Sequence[object]) -> bool | None:
+    """Avalia grupos declarativos sem pedir equivalência ao modelo auditor."""
+    if not conceitos:
+        return None
+    for conceito in conceitos:
+        alternativas = (
+            conceito.get("qualquer_de", [])
+            if isinstance(conceito, dict)
+            else [conceito]
+        )
+        if not isinstance(alternativas, list) or not alternativas:
+            return False
+        if not any(_alternativa_presente(texto, item) for item in alternativas):
+            return False
+    return True
 
 
 def carregar_casos_geracao(
@@ -200,17 +296,50 @@ def extrair_citacoes(resposta: str) -> list[tuple[str, int]]:
     ]
 
 
+def _citacoes_unicas(
+    citacoes: Sequence[tuple[str, int]],
+) -> tuple[tuple[str, int], ...]:
+    unicas: list[tuple[str, int]] = []
+    vistas: set[tuple[str, int]] = set()
+    for arquivo, pagina in citacoes:
+        chave = (normalizar_caminho(arquivo), pagina)
+        if chave in vistas:
+            continue
+        vistas.add(chave)
+        unicas.append((arquivo, pagina))
+    return tuple(unicas)
+
+
+def _separar_corpo_bibliografia(resposta: str) -> tuple[str, str]:
+    partes = re.split(
+        r"(?im)^\s*(?:#+\s*)?fontes\s*:?\s*$", resposta, maxsplit=1
+    )
+    return partes[0], partes[1] if len(partes) == 2 else ""
+
+
 def analisar_citacoes(
     resposta: str,
     trechos: Sequence[TrechoRecuperado],
     *,
     aplicavel: bool,
-) -> tuple[bool | None, bool | None, tuple[tuple[str, int], ...]]:
-    citacoes = tuple(extrair_citacoes(resposta))
+) -> AnaliseCitacoes:
+    corpo, bibliografia = _separar_corpo_bibliografia(resposta)
+    inline = _citacoes_unicas(extrair_citacoes(corpo))
+    finais = _citacoes_unicas(extrair_citacoes(bibliografia))
+    ocorrencias = tuple(extrair_citacoes(resposta))
+    citacoes = _citacoes_unicas(ocorrencias)
     if not aplicavel:
-        return None, None, citacoes
+        return AnaliseCitacoes(
+            None,
+            None,
+            ocorrencias,
+            citacoes,
+            inline,
+            finais,
+            len(ocorrencias) - len(citacoes),
+        )
     aparentes = _PADRAO_CITACAO_APARENTE.findall(resposta)
-    formal = bool(citacoes) and len(citacoes) == len(aparentes)
+    formal = bool(citacoes) and len(ocorrencias) == len(aparentes)
     permitidas = {
         (normalizar_caminho(item.arquivo), item.pagina) for item in trechos
     }
@@ -218,7 +347,15 @@ def analisar_citacoes(
         (normalizar_caminho(arquivo), pagina) in permitidas
         for arquivo, pagina in citacoes
     )
-    return formal, recuperada, citacoes
+    return AnaliseCitacoes(
+        formal,
+        recuperada,
+        ocorrencias,
+        citacoes,
+        inline,
+        finais,
+        len(ocorrencias) - len(citacoes),
+    )
 
 
 def validar_citacoes(
@@ -228,8 +365,10 @@ def validar_citacoes(
     exigir: bool,
 ) -> bool:
     """API legada: valida formato e pertencimento aos trechos."""
-    formal, recuperada, _ = analisar_citacoes(resposta, trechos, aplicavel=exigir)
-    return True if not exigir else bool(formal and recuperada)
+    analise = analisar_citacoes(resposta, trechos, aplicavel=exigir)
+    return True if not exigir else bool(
+        analise.formal_valida and analise.pertencem_recuperacao
+    )
 
 
 def resposta_recusou(resposta: str) -> bool:
@@ -441,6 +580,8 @@ def avaliar_rastreabilidade_estrutural(
             "tentativas_trecho_inexistente": None,
             "tentativas_mistura_arquivos": None,
             "afirmacoes_publicadas_sem_evidencia": None,
+            "trechos_suporte_por_afirmacao": None,
+            "paginas_citadas_por_afirmacao": None,
         }
 
     diagnostico = diagnostico or DiagnosticoEstrutural()
@@ -451,8 +592,13 @@ def avaliar_rastreabilidade_estrutural(
         if not item.trecho_ids or len(item.trecho_ids) != len(item.ids_chroma):
             return False
         associados = [por_rotulo.get(rotulo) for rotulo in item.trecho_ids]
+        contexto = [
+            por_rotulo.get(rotulo) for rotulo in item.trecho_ids_contexto
+        ]
         return bool(
             all(associados)
+            and all(contexto)
+            and len(item.trecho_ids_contexto) == len(item.ids_chroma_contexto)
             and all(
                 associado is not None
                 and associado.id_chroma == id_chroma
@@ -460,7 +606,22 @@ def avaliar_rastreabilidade_estrutural(
                 and associado.pagina in item.paginas
                 for associado, id_chroma in zip(associados, item.ids_chroma)
             )
-            and len({associado.arquivo for associado in associados if associado}) == 1
+            and all(
+                associado is not None
+                and associado.id_chroma == id_chroma
+                and associado.arquivo == item.arquivo
+                and associado.pagina in item.paginas_contexto
+                for associado, id_chroma in zip(
+                    contexto, item.ids_chroma_contexto
+                )
+            )
+            and len(
+                {
+                    associado.arquivo
+                    for associado in [*associados, *contexto]
+                    if associado
+                }
+            ) == 1
         )
 
     validade_evidencias = {
@@ -501,6 +662,8 @@ def avaliar_rastreabilidade_estrutural(
     publicadas_sem_evidencia = 0
     citacoes_por_afirmacao_validas = True
     fontes_derivadas: set[tuple[str, int]] = set()
+    trechos_suporte_por_afirmacao: list[int] = []
+    paginas_citadas_por_afirmacao: list[int] = []
     for sentenca in publicadas:
         limpa = normalizar(_PADRAO_CITACAO.sub("", sentenca))
         correspondentes = [
@@ -516,11 +679,26 @@ def avaliar_rastreabilidade_estrutural(
         if afirmacao is None or not afirmacao_valida(afirmacao):
             publicadas_sem_evidencia += 1
             citacoes_por_afirmacao_validas = False
+            trechos_suporte_por_afirmacao.append(0)
+            paginas_citadas_por_afirmacao.append(
+                len(_citacoes_unicas(extrair_citacoes(sentenca)))
+            )
             continue
         publicadas_validas += 1
+        trechos_suporte_por_afirmacao.append(
+            len(
+                {
+                    rotulo
+                    for evidencia_id in afirmacao.evidencia_ids
+                    if (evidencia := por_evidencia.get(evidencia_id)) is not None
+                    for rotulo in evidencia.trecho_ids_suporte
+                }
+            )
+        )
         fontes = set(
             _fontes_da_afirmacao_por_evidencias(afirmacao, por_evidencia)
         )
+        paginas_citadas_por_afirmacao.append(len(fontes))
         fontes_derivadas.update(fontes)
         if set(extrair_citacoes(sentenca)) != fontes:
             citacoes_por_afirmacao_validas = False
@@ -551,6 +729,12 @@ def avaliar_rastreabilidade_estrutural(
         ),
         "tentativas_mistura_arquivos": diagnostico.tentativas_mistura_arquivos,
         "afirmacoes_publicadas_sem_evidencia": publicadas_sem_evidencia,
+        "trechos_suporte_por_afirmacao": tuple(
+            trechos_suporte_por_afirmacao
+        ),
+        "paginas_citadas_por_afirmacao": tuple(
+            paginas_citadas_por_afirmacao
+        ),
     }
 
 
@@ -590,24 +774,23 @@ def avaliar_saida(
     esperadas = {int(item) for item in caso.get("paginas_esperadas", [])}
     arquivo_esperado = str(caso.get("arquivo") or "").strip()
     arquivo_normalizado = normalizar_caminho(arquivo_esperado)
-    termos = [normalizar(str(item)) for item in caso.get("conceitos_esperados", [])]
-    texto = normalizar(resposta)
+    conceitos = list(caso.get("conceitos_esperados", []))
     espera_recusa = bool(caso.get("espera_recusa"))
     espera_resposta = not espera_recusa
     recusou = insuficiente or resposta_recusou(resposta)
 
     arquivos_retornados = {normalizar_caminho(item.arquivo) for item in trechos}
-    arquivo_correto = (
+    arquivo_recuperado = (
         arquivo_normalizado in arquivos_retornados
         if espera_resposta and arquivo_normalizado
         else None
     )
-    pagina_correta = (
+    pagina_recuperada = (
         bool(esperadas.intersection(paginas))
         if espera_resposta and esperadas
         else None
     )
-    fonte_correta = (
+    fonte_recuperada = (
         any(
             normalizar_caminho(item.arquivo) == arquivo_normalizado
             and item.pagina in esperadas
@@ -617,12 +800,26 @@ def avaliar_saida(
         else None
     )
     conceitos_presentes = (
-        all(item in texto for item in termos)
-        if espera_resposta and termos
+        avaliar_conceitos(resposta, conceitos)
+        if espera_resposta and conceitos
         else None
     )
-    formal, recuperada, citacoes = analisar_citacoes(
+    analise_citacoes = analisar_citacoes(
         resposta, trechos, aplicavel=espera_resposta
+    )
+    citacao_pagina_esperada = (
+        any(pagina in esperadas for _, pagina in analise_citacoes.unicas)
+        if espera_resposta and esperadas
+        else None
+    )
+    citacao_fonte_esperada = (
+        any(
+            normalizar_caminho(arquivo) == arquivo_normalizado
+            and pagina in esperadas
+            for arquivo, pagina in analise_citacoes.unicas
+        )
+        if espera_resposta and arquivo_normalizado and esperadas
+        else None
     )
     afirmacoes = tuple(afirmacoes)
     reprovadas = sum(
@@ -661,7 +858,7 @@ def avaliar_saida(
     expectativa = {
         "arquivo": arquivo_esperado,
         "paginas_esperadas": sorted(esperadas),
-        "conceitos_esperados": list(caso.get("conceitos_esperados", [])),
+        "conceitos_esperados": conceitos,
         "idioma": caso.get("idioma", "Português"),
         "espera_recusa": espera_recusa,
     }
@@ -670,12 +867,14 @@ def avaliar_saida(
         modo=modo,
         tipo_caso=str(caso.get("tipo") or ""),
         expectativa=expectativa,
-        arquivo_correto=arquivo_correto,
-        pagina_correta=pagina_correta,
-        fonte_correta=fonte_correta,
+        # Aliases legados: no esquema 2.1 estes três campos continuam medindo
+        # recuperação. Consumidores novos devem usar os nomes inequívocos.
+        arquivo_correto=arquivo_recuperado,
+        pagina_correta=pagina_recuperada,
+        fonte_correta=fonte_recuperada,
         conceitos_presentes=conceitos_presentes,
-        citacao_formal_valida=formal,
-        citacao_recuperada=recuperada,
+        citacao_formal_valida=analise_citacoes.formal_valida,
+        citacao_recuperada=analise_citacoes.pertencem_recuperacao,
         citacao_sustenta_afirmacao=_citacoes_sustentam_afirmacoes(
             afirmacoes, aplicavel=espera_resposta
         ),
@@ -693,7 +892,7 @@ def avaliar_saida(
         nao_sustentadas_publicadas=inseguras_publicadas,
         paginas_retornadas=paginas,
         fontes_retornadas=fontes,
-        citacoes=citacoes,
+        citacoes=analise_citacoes.unicas,
         documento=documento,
         resposta=resposta,
         observacao=str(caso.get("observacao") or ""),
@@ -736,6 +935,29 @@ def avaliar_saida(
         afirmacoes_publicadas_sem_evidencia=rastreabilidade[
             "afirmacoes_publicadas_sem_evidencia"
         ],
+        arquivo_recuperado=arquivo_recuperado,
+        pagina_recuperada=pagina_recuperada,
+        fonte_recuperada=fonte_recuperada,
+        citacao_pagina_esperada=citacao_pagina_esperada,
+        citacao_fonte_esperada=citacao_fonte_esperada,
+        citacoes_inline=analise_citacoes.inline,
+        citacoes_bibliografia=analise_citacoes.bibliografia,
+        quantidade_citacoes_unicas=(
+            len(analise_citacoes.unicas) if espera_resposta else None
+        ),
+        citacoes_duplicadas_removidas=(
+            analise_citacoes.duplicadas_removidas if espera_resposta else None
+        ),
+        trechos_suporte_por_afirmacao=(
+            tuple(rastreabilidade["trechos_suporte_por_afirmacao"])
+            if rastreabilidade["trechos_suporte_por_afirmacao"] is not None
+            else None
+        ),
+        paginas_citadas_por_afirmacao=(
+            tuple(rastreabilidade["paginas_citadas_por_afirmacao"])
+            if rastreabilidade["paginas_citadas_por_afirmacao"] is not None
+            else None
+        ),
     )
 
 
@@ -771,12 +993,18 @@ def _agregar_booleanos(
 def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
     total = len(resultados)
     nomes_deterministicos = (
+        "arquivo_recuperado",
+        "pagina_recuperada",
+        "fonte_recuperada",
+        "citacao_pagina_esperada",
+        "citacao_fonte_esperada",
         "arquivo_correto",
         "pagina_correta",
         "fonte_correta",
         "conceitos_presentes",
         "citacao_formal_valida",
         "citacao_recuperada",
+        "citacoes_validas",
         "idioma_correto",
         "resposta_presente",
         "recusa_correta",
@@ -820,6 +1048,21 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         for item in resultados
         if item.cobertura_evidencias_afirmacoes is not None
     ]
+    suportes_por_afirmacao = [
+        quantidade
+        for item in resultados
+        if item.trechos_suporte_por_afirmacao is not None
+        for quantidade in item.trechos_suporte_por_afirmacao
+    ]
+    paginas_por_afirmacao = [
+        quantidade
+        for item in resultados
+        if item.paginas_citadas_por_afirmacao is not None
+        for quantidade in item.paginas_citadas_por_afirmacao
+    ]
+    suporte_aplicavel = any(
+        item.trechos_suporte_por_afirmacao is not None for item in resultados
+    )
     rastreabilidade = {
         "origens_vinculos": sorted(
             {item.origem_vinculos_evidencia for item in resultados}
@@ -840,6 +1083,18 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         "afirmacoes_publicadas_sem_evidencia": sum(
             item.afirmacoes_publicadas_sem_evidencia or 0 for item in resultados
         ),
+        "quantidade_citacoes_unicas": sum(
+            item.quantidade_citacoes_unicas or 0 for item in resultados
+        ),
+        "citacoes_duplicadas_removidas": sum(
+            item.citacoes_duplicadas_removidas or 0 for item in resultados
+        ),
+        "trechos_suporte_por_afirmacao": (
+            suportes_por_afirmacao if suporte_aplicavel else None
+        ),
+        "paginas_citadas_por_afirmacao": (
+            paginas_por_afirmacao if suporte_aplicavel else None
+        ),
     }
 
     def taxa(nome: str) -> float | None:
@@ -856,7 +1111,7 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         "metricas_rastreabilidade_deterministicas": rastreabilidade,
         "metricas_auxiliares_qwen": auxiliares,
         # Chaves legadas para a interface e consumidores existentes.
-        "recuperacao_pagina": taxa("pagina_correta"),
+        "recuperacao_pagina": taxa("pagina_recuperada"),
         "conceitos": taxa("conceitos_presentes"),
         "citacoes": (
             sum(item.citacoes_validas is True for item in citacoes_aplicaveis)
@@ -951,8 +1206,13 @@ def _serializar_evidencia(item: EvidenciaOrganizada) -> dict:
         "natureza": item.natureza,
         "trecho_ids": list(item.trecho_ids),
         "ids_chroma": list(item.ids_chroma),
+        "trecho_ids_suporte": list(item.trecho_ids_suporte),
+        "ids_chroma_suporte": list(item.ids_chroma_suporte),
+        "trecho_ids_contexto": list(item.trecho_ids_contexto),
+        "ids_chroma_contexto": list(item.ids_chroma_contexto),
         "arquivo": item.arquivo,
         "paginas_pdf": list(item.paginas),
+        "paginas_contexto_pdf": list(item.paginas_contexto),
     }
 
 
@@ -990,6 +1250,22 @@ def serializar_resultado(item: ResultadoGeracao) -> dict:
             {"arquivo": arquivo, "pagina_pdf": pagina}
             for arquivo, pagina in item.citacoes
         ],
+        "citacoes_publicadas": {
+            "inline": [
+                {"arquivo": arquivo, "pagina_pdf": pagina}
+                for arquivo, pagina in item.citacoes_inline
+            ],
+            "bibliografia_final": [
+                {"arquivo": arquivo, "pagina_pdf": pagina}
+                for arquivo, pagina in item.citacoes_bibliografia
+            ],
+            "unicas": [
+                {"arquivo": arquivo, "pagina_pdf": pagina}
+                for arquivo, pagina in item.citacoes
+            ],
+            "quantidade_unicas": item.quantidade_citacoes_unicas,
+            "duplicadas_removidas": item.citacoes_duplicadas_removidas,
+        },
         "afirmacoes_auditadas": [
             _serializar_afirmacao(afirmacao)
             for afirmacao in item.afirmacoes_auditadas
@@ -1009,8 +1285,13 @@ def serializar_resultado(item: ResultadoGeracao) -> dict:
                     "evidencia_id": evidencia.id,
                     "trecho_ids": list(evidencia.trecho_ids),
                     "ids_chroma": list(evidencia.ids_chroma),
+                    "trecho_ids_suporte": list(evidencia.trecho_ids_suporte),
+                    "ids_chroma_suporte": list(evidencia.ids_chroma_suporte),
+                    "trecho_ids_contexto": list(evidencia.trecho_ids_contexto),
+                    "ids_chroma_contexto": list(evidencia.ids_chroma_contexto),
                     "arquivo": evidencia.arquivo,
                     "paginas_pdf": list(evidencia.paginas),
+                    "paginas_contexto_pdf": list(evidencia.paginas_contexto),
                 }
                 for evidencia in evidencias_por_id.values()
             ],
@@ -1069,16 +1350,39 @@ def criar_relatorio_detalhado(
             sum(item.duracao_segundos for item in resultados), 6
         ),
         "metricas": resumo_metricas(resultados),
+        "semantica_metricas": {
+            "campos_inequivocos": {
+                "pagina_recuperada": "página esperada presente nos trechos recuperados",
+                "fonte_recuperada": "arquivo e página esperados presentes nos trechos recuperados",
+                "citacao_pagina_esperada": "página esperada citada na resposta publicada",
+                "citacao_fonte_esperada": "arquivo e página esperados citados na resposta publicada",
+            },
+            "aliases_legados_recuperacao": {
+                "arquivo_correto": "arquivo_recuperado",
+                "pagina_correta": "pagina_recuperada",
+                "fonte_correta": "fonte_recuperada",
+            },
+        },
         "casos": [serializar_resultado(item) for item in resultados],
         "observacoes_e_limitacoes": [
             AVISO_AUDITORIA_QWEN,
             "Métricas determinísticas não aplicáveis são registradas como null e excluídas dos denominadores.",
             "Frases programáticas de recusa são registradas como texto publicado, mas avaliadas por recusa_correta em vez da auditoria factual do Qwen.",
             "No modo Fundamentado, citações são derivadas de IDs validados; no modo Compatibilidade, vínculos pós-publicação são apenas reconstruções auxiliares.",
-            "Os campos de rastreabilidade foram adicionados de forma compatível ao esquema 2.0.",
+            "O esquema 2.1 adiciona métricas inequívocas de recuperação e citação publicada, preservando aliases legados de recuperação.",
+            "Trechos de contexto não originam citações e não são apresentados ao auditor como suporte factual.",
+            "A atomicidade semântica do suporte é orientada ao Qwen; as contagens de trechos e páginas são descritivas, não prova de minimalidade.",
             "O arquivo avaliacao/linha_base_geracao.json pertence ao esquema anterior e não é comparável diretamente.",
         ],
     }
+
+
+def carregar_relatorio_detalhado(caminho: Path) -> dict:
+    """Carrega esquemas históricos sem inventar métricas ausentes."""
+    dados = json.loads(caminho.read_text(encoding="utf-8"))
+    if not isinstance(dados, dict):
+        raise ValueError("O relatório detalhado deve conter um objeto JSON.")
+    return dados
 
 
 def salvar_resultados_detalhados(

@@ -1,14 +1,17 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from src.chat import TrechoRecuperado
 from src.generation_eval import (
     auditar_resposta_publicada,
+    avaliar_conceitos,
     avaliar_rastreabilidade_estrutural,
     avaliar_idioma,
     avaliar_saida,
+    carregar_relatorio_detalhado,
     metadados_auditoria,
     resumo_metricas,
     salvar_resultados_detalhados,
@@ -193,6 +196,29 @@ def test_pagina_certa_no_arquivo_errado_nao_e_fonte_correta():
     assert resultado.pagina_correta is True
     assert resultado.arquivo_correto is False
     assert resultado.fonte_correta is False
+    assert resultado.citacao_pagina_esperada is True
+    assert resultado.citacao_fonte_esperada is False
+
+
+def test_pagina_recuperada_nao_aprova_citacao_publicada_em_pagina_errada():
+    resultado = avaliar(
+        trechos=[trecho(ARQUIVO, 42), trecho(ARQUIVO, 43)],
+        resposta=resposta_citada(ARQUIVO, 43),
+        afirmacoes=[afirmacao(pagina=43)],
+    )
+
+    assert resultado.pagina_recuperada is True
+    assert resultado.fonte_recuperada is True
+    assert resultado.citacao_pagina_esperada is False
+    assert resultado.citacao_fonte_esperada is False
+
+
+def test_pagina_recuperada_e_corretamente_citada_aprova_as_duas_metricas():
+    resultado = avaliar()
+
+    assert resultado.pagina_recuperada is True
+    assert resultado.citacao_pagina_esperada is True
+    assert resultado.citacao_fonte_esperada is True
 
 
 def test_arquivo_certo_na_pagina_errada_nao_e_fonte_correta():
@@ -231,6 +257,9 @@ def test_recusa_torna_paginas_conceitos_e_citacoes_nao_aplicaveis():
     assert resultado.conceitos_presentes is None
     assert resultado.citacao_formal_valida is None
     assert resultado.citacao_recuperada is None
+    assert resultado.citacao_pagina_esperada is None
+    assert resultado.citacao_fonte_esperada is None
+    assert resultado.quantidade_citacoes_unicas is None
     assert resultado.recusa_correta is True
 
 
@@ -271,6 +300,16 @@ def test_citacao_valida_mas_nao_recuperada():
     assert resultado.citacao_recuperada is False
 
 
+def test_citacao_inline_repetida_em_fontes_e_contada_uma_vez():
+    resultado = avaliar()
+
+    assert resultado.citacoes == ((ARQUIVO, 42),)
+    assert resultado.citacoes_inline == ((ARQUIVO, 42),)
+    assert resultado.citacoes_bibliografia == ((ARQUIVO, 42),)
+    assert resultado.quantidade_citacoes_unicas == 1
+    assert resultado.citacoes_duplicadas_removidas == 1
+
+
 def test_recusa_sem_citacao_nao_falha_metrica_de_citacao():
     caso = caso_resposta() | {
         "paginas_esperadas": [],
@@ -309,6 +348,38 @@ def test_idioma_de_formula_isolada_e_indeterminado():
     assert avaliar_idioma("x(t) = x(t + T)", "Português") is None
 
 
+def test_conceito_aceita_alternativa_numerica_declarada_com_virgula():
+    conceitos = [
+        {
+            "id": "frequencia_minima",
+            "qualquer_de": [
+                "14 rad/s",
+                {"valor": 2.2282, "unidade": "Hz", "tolerancia": 0.0005},
+            ],
+        }
+    ]
+
+    assert avaliar_conceitos("A frequência mínima é 14 rad/s.", conceitos) is True
+    assert avaliar_conceitos("A frequência mínima é 2,2282 Hz.", conceitos) is True
+
+
+@pytest.mark.parametrize(
+    "resposta",
+    ("A frequência é 2,2282 rad/s.", "A frequência é 2,5 Hz."),
+)
+def test_conceito_rejeita_unidade_incompativel_ou_valor_fora_da_tolerancia(resposta):
+    conceitos = [
+        {
+            "id": "frequencia_minima",
+            "qualquer_de": [
+                {"valor": 2.2282, "unidade": "Hz", "tolerancia": 0.0005}
+            ],
+        }
+    ]
+
+    assert avaliar_conceitos(resposta, conceitos) is False
+
+
 def test_metricas_deterministicas_cobrem_afirmacao_evidencia_trecho_e_citacao():
     resultado = avaliar_estruturado()
 
@@ -322,6 +393,33 @@ def test_metricas_deterministicas_cobrem_afirmacao_evidencia_trecho_e_citacao():
     ]
     assert agregadas["cobertura_media_evidencias_afirmacoes"] == 1.0
     assert agregadas["afirmacoes_publicadas_sem_evidencia"] == 0
+
+
+def test_rastreabilidade_conta_somente_suporte_e_nao_contexto():
+    trechos = [trecho(pagina=42), trecho(pagina=43)]
+    evidencia = EvidenciaOrganizada(
+        id="E1",
+        tipo="definicao",
+        conteudo="Um sinal periódico se repete após um período.",
+        natureza="texto_explicito",
+        trecho_ids=("T1",),
+        ids_chroma=(f"{ARQUIVO}:42",),
+        arquivo=ARQUIVO,
+        paginas=(42,),
+        trecho_ids_contexto=("T2",),
+        ids_chroma_contexto=(f"{ARQUIVO}:43",),
+        paginas_contexto=(43,),
+    )
+
+    resultado = avaliar_estruturado(
+        trechos=trechos,
+        evidencias_geracao=[evidencia],
+    )
+
+    assert resultado.citacoes_derivadas_evidencias is True
+    assert resultado.trechos_suporte_por_afirmacao == (1,)
+    assert resultado.paginas_citadas_por_afirmacao == (1,)
+    assert resultado.citacoes == ((ARQUIVO, 42),)
 
 
 def test_afirmacao_publicada_sem_evidencia_reduz_cobertura():
@@ -363,6 +461,13 @@ def test_modo_compatibilidade_nao_inventa_ids_de_evidencia():
     assert resultado.evidencias_com_trechos_validos is None
     assert resultado.citacoes_derivadas_evidencias is None
     assert resultado.tentativas_evidencia_inexistente is None
+    assert resultado.trechos_suporte_por_afirmacao is None
+    assert resultado.paginas_citadas_por_afirmacao is None
+    rastreabilidade = resumo_metricas([resultado])[
+        "metricas_rastreabilidade_deterministicas"
+    ]
+    assert rastreabilidade["trechos_suporte_por_afirmacao"] is None
+    assert rastreabilidade["paginas_citadas_por_afirmacao"] is None
 
 
 def test_serializacao_do_relatorio_detalhado(tmp_path):
@@ -373,7 +478,7 @@ def test_serializacao_do_relatorio_detalhado(tmp_path):
         data_utc=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
     )
     dados = json.loads(destino.read_text(encoding="utf-8"))
-    assert dados["versao_esquema"] == "2.0"
+    assert dados["versao_esquema"] == "2.1"
     assert dados["ambiente"]["sistema_operacional"]
     assert dados["modelos"]["avaliacao_independente"] is False
     assert dados["casos"][0]["resposta_final"] == resposta_citada()
@@ -385,9 +490,32 @@ def test_serializacao_do_relatorio_detalhado(tmp_path):
         "evidencia_ids"
     ] == ["E1"]
     assert caso["rastreabilidade"]["evidencia_para_trechos"][0][
-        "trecho_ids"
+        "trecho_ids_suporte"
     ] == ["T1"]
-    assert "C:\\Users\\erick" not in destino.read_text(encoding="utf-8")
+    assert caso["citacoes_publicadas"]["quantidade_unicas"] == 1
+    assert caso["citacoes_publicadas"]["duplicadas_removidas"] == 1
+    assert str(Path.home()) not in destino.read_text(encoding="utf-8")
+
+
+def test_relatorio_antigo_carrega_sem_inventar_metricas_novas(tmp_path):
+    antigo = tmp_path / "relatorio-2.0.json"
+    antigo.write_text(
+        json.dumps(
+            {
+                "versao_esquema": "2.0",
+                "metricas": {
+                    "metricas_deterministicas": {"pagina_correta": True}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    carregado = carregar_relatorio_detalhado(antigo)
+
+    assert carregado["versao_esquema"] == "2.0"
+    assert "pagina_recuperada" not in carregado["metricas"]["metricas_deterministicas"]
+    assert json.loads(json.dumps(carregado)) == carregado
 
 
 def test_salvamento_preserva_resultado_anterior(tmp_path):

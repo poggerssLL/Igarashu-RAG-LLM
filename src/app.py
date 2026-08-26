@@ -157,11 +157,13 @@ def exibir_evidencias(evidencias: list) -> None:
                 else "texto explícito"
             )
             paginas = ", ".join(str(pagina) for pagina in evidencia.paginas)
-            trechos = ", ".join(evidencia.trecho_ids)
+            suporte = ", ".join(evidencia.trecho_ids_suporte)
+            contexto = ", ".join(evidencia.trecho_ids_contexto) or "nenhum"
             st.markdown(
                 f"- **{evidencia.id} · {evidencia.tipo}** · `{natureza}`  \n"
                 f"  Arquivo: **{evidencia.arquivo}** · página do PDF **{paginas}** · "
-                f"trechos `{trechos}`  \n  {evidencia.conteudo}"
+                f"suporte `{suporte}` · contexto não citado `{contexto}`  \n"
+                f"  {evidencia.conteudo}"
             )
 
 
@@ -701,14 +703,16 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
 
             colunas = st.columns(3)
             colunas[0].metric(
-                "Página correta", exibir_contagem(deterministicas["pagina_correta"])
+                "Página recuperada",
+                exibir_contagem(deterministicas["pagina_recuperada"]),
             )
             colunas[1].metric(
-                "Fonte correta", exibir_contagem(deterministicas["fonte_correta"])
+                "Página esperada citada",
+                exibir_contagem(deterministicas["citacao_pagina_esperada"]),
             )
             colunas[2].metric(
-                "Citação recuperada",
-                exibir_contagem(deterministicas["citacao_recuperada"]),
+                "Fonte esperada citada",
+                exibir_contagem(deterministicas["citacao_fonte_esperada"]),
             )
             colunas = st.columns(3)
             colunas[0].metric(
@@ -718,17 +722,15 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
                 "Recusa correta", exibir_contagem(deterministicas["recusa_correta"])
             )
             colunas[2].metric(
-                "Sem afirmação insegura",
-                exibir_contagem(
-                    auxiliares["casos_sem_afirmacao_publicada_insegura"]
-                ),
+                "Citações válidas",
+                exibir_contagem(deterministicas["citacao_recuperada"]),
             )
             if base.get("casos"):
                 det_base = base["metricas_deterministicas"]
                 aux_base = base["metricas_auxiliares_qwen"]
                 st.caption(
-                    "Linha de base corrigida: fonte "
-                    f"{exibir_contagem(det_base['fonte_correta'])}, recusas "
+                    "Linha de base corrigida: fonte citada "
+                    f"{exibir_contagem(det_base['citacao_fonte_esperada'])}, recusas "
                     f"{exibir_contagem(det_base['recusa_correta'])}, casos sem afirmação "
                     f"insegura {exibir_contagem(aux_base['casos_sem_afirmacao_publicada_insegura'])}."
                 )

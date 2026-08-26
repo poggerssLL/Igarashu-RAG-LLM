@@ -39,6 +39,9 @@ def evidencia(
     tipo="definicao",
     conteudo="Um sinal periódico se repete após T.",
     natureza="texto_explicito",
+    trecho_ids_contexto=(),
+    ids_chroma_contexto=(),
+    paginas_contexto=(),
 ):
     return EvidenciaOrganizada(
         id=evidencia_id,
@@ -49,6 +52,9 @@ def evidencia(
         ids_chroma=ids_chroma,
         arquivo=arquivo,
         paginas=paginas,
+        trecho_ids_contexto=trecho_ids_contexto,
+        ids_chroma_contexto=ids_chroma_contexto,
+        paginas_contexto=paginas_contexto,
     )
 
 
@@ -233,6 +239,107 @@ def test_evidencia_pode_usar_varios_trechos_do_mesmo_pdf():
     assert evidencias[0].paginas == (42, 43)
 
 
+def test_evidencia_separa_suporte_de_contexto_e_cita_somente_suporte():
+    cliente = Mock()
+    cliente.chat.return_value = resposta_json(
+        {
+            "suficiente": True,
+            "evidencias": [
+                {
+                    "tipo": "fato",
+                    "conteudo": "O resultado está no primeiro trecho.",
+                    "trecho_ids_suporte": ["T1"],
+                    "trecho_ids_contexto": ["T2"],
+                }
+            ],
+        }
+    )
+    trechos = [
+        trecho("resultado", pagina=42),
+        trecho("explicação contextual", pagina=43),
+    ]
+
+    evidencias, suficiente, _ = organizar_evidencias(cliente, "Pergunta", trechos)
+    afirmacao = AfirmacaoVerificada(
+        texto_original="O resultado está no primeiro trecho.",
+        texto_final="O resultado está no primeiro trecho.",
+        classificacao="sustentada",
+        paginas=(42,),
+        natureza="texto_explicito",
+        secao="resposta_direta",
+        evidencia_ids=("E1",),
+    )
+    resposta, insuficiente = montar_resposta_verificada(
+        "livro.pdf", [afirmacao], "Curto", evidencias=evidencias
+    )
+
+    assert suficiente is True
+    assert insuficiente is False
+    assert evidencias[0].trecho_ids_suporte == ("T1",)
+    assert evidencias[0].trecho_ids_contexto == ("T2",)
+    assert evidencias[0].paginas == (42,)
+    assert evidencias[0].paginas_contexto == (43,)
+    assert "página do PDF 42" in resposta
+    assert "página do PDF 43" not in resposta
+
+
+def test_afirmacao_que_depende_de_duas_paginas_preserva_ambas_as_citacoes():
+    evidencias = [
+        evidencia(
+            trecho_ids=("T1", "T2"),
+            ids_chroma=("livro.pdf-42-0", "livro.pdf-43-0"),
+            paginas=(42, 43),
+            conteudo="A condição começa em 42 e termina em 43.",
+        )
+    ]
+    afirmacao = AfirmacaoVerificada(
+        texto_original="A condição ocupa duas páginas.",
+        texto_final="A condição ocupa duas páginas.",
+        classificacao="sustentada",
+        paginas=(42, 43),
+        natureza="texto_explicito",
+        secao="resposta_direta",
+        evidencia_ids=("E1",),
+    )
+
+    resposta, insuficiente = montar_resposta_verificada(
+        "livro.pdf", [afirmacao], "Curto", evidencias=evidencias
+    )
+
+    assert insuficiente is False
+    assert "página do PDF 42" in resposta
+    assert "página do PDF 43" in resposta
+
+
+def test_evidencia_rejeita_id_de_suporte_nao_recuperado():
+    cliente = Mock()
+    diagnostico = DiagnosticoEstrutural()
+    cliente.chat.return_value = resposta_json(
+        {
+            "suficiente": True,
+            "evidencias": [
+                {
+                    "tipo": "fato",
+                    "conteudo": "Não recuperado.",
+                    "trecho_ids_suporte": ["T99"],
+                    "trecho_ids_contexto": ["T1"],
+                }
+            ],
+        }
+    )
+
+    evidencias, suficiente, _ = organizar_evidencias(
+        cliente,
+        "Pergunta",
+        [trecho("contexto", pagina=42)],
+        diagnostico=diagnostico,
+    )
+
+    assert evidencias == []
+    assert suficiente is False
+    assert diagnostico.trecho_ids_invalidos_rejeitados == ["T99"]
+
+
 def test_evidencia_que_mistura_pdfs_e_rejeitada():
     cliente = Mock()
     diagnostico = DiagnosticoEstrutural()
@@ -347,6 +454,36 @@ def test_afirmacao_com_evidencia_valida_preserva_vinculo_e_paginas_derivadas():
     assert verificadas[0].evidencia_ids == ("E1",)
     assert verificadas[0].paginas == (42,)
     assert verificadas[0].fontes == (("livro.pdf", 42),)
+
+
+def test_auditor_recebe_somente_trechos_de_suporte_da_afirmacao():
+    cliente = Mock()
+    cliente.chat.return_value = resposta_auditor()
+    trechos = [
+        trecho("suporte explícito", pagina=42),
+        trecho("contexto amplo", pagina=43),
+    ]
+    evidencias = [
+        evidencia(
+            trecho_ids_contexto=("T2",),
+            ids_chroma_contexto=("livro.pdf-43-0",),
+            paginas_contexto=(43,),
+        )
+    ]
+
+    verificar_afirmacoes(
+        cliente,
+        [{"texto": "Um sinal periódico se repete após T.", "evidencia_ids": ["E1"]}],
+        trechos,
+        "Português",
+        evidencias=evidencias,
+        trechos_rotulados=rotular_trechos(trechos),
+    )
+
+    prompt = cliente.chat.call_args.kwargs["messages"][1]["content"]
+    assert "[T1]" in prompt
+    assert "[T2]" not in prompt
+    assert "contexto amplo" not in prompt
 
 
 def test_afirmacao_com_evidencia_inexistente_e_rejeitada_sem_chamar_auditor():

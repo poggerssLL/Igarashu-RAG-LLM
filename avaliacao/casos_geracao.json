@@ -83,7 +83,19 @@
     "disciplina": "Sinais e Sistemas",
     "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
     "paginas_esperadas": [18, 19],
-    "conceitos_esperados": ["14 rad/s"],
+    "conceitos_esperados": [
+      {
+        "id": "frequencia_minima",
+        "qualquer_de": [
+          "14 rad/s",
+          {
+            "valor": 2.2282,
+            "unidade": "Hz",
+            "tolerancia": 0.0005
+          }
+        ]
+      }
+    ],
     "idioma": "Português",
     "nivel_detalhe": "Passo a passo",
     "espera_recusa": false,

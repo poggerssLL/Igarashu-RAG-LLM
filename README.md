@@ -138,10 +138,10 @@ O modo padrão de consulta é **Fundamentado**. Ele não faz síntese entre vár
    em páginas vizinhas;
 4. atribui rótulos efêmeros `T1`, `T2` etc. aos IDs reais dos trechos do ChromaDB;
 5. pede ao Qwen para organizar fatos, definições, fórmulas, condições e limitações,
-   obrigatoriamente vinculados aos rótulos `Tn`;
+   separando o menor conjunto de `trecho_ids_suporte` dos trechos apenas contextuais;
 6. valida os vínculos e cria programaticamente evidências `E1`, `E2` etc.;
 7. exige que cada afirmação declare seus `evidencia_ids` e entrega ao auditor somente
-   essas evidências e seus trechos;
+   essas evidências e seus trechos de suporte, nunca os trechos apenas contextuais;
 8. publica somente afirmações sustentadas e gera as citações a partir da relação
    `afirmação → En → Tn → ID do ChromaDB → arquivo/página`.
 
@@ -274,8 +274,20 @@ preservado sem sobrescrita; seus números não são diretamente comparáveis aos
 novos. Cada execução corrigida cria um JSON com timestamp UTC em
 `avaliacao/resultados/`, sem substituir execuções anteriores.
 
-As métricas determinísticas registram arquivo, página, combinação arquivo/página,
-conceitos, formato e pertencimento das citações, idioma, presença de resposta e recusa.
+As métricas determinísticas distinguem explicitamente `pagina_recuperada` e
+`fonte_recuperada` (presentes nos candidatos) de `citacao_pagina_esperada` e
+`citacao_fonte_esperada` (realmente publicadas). Uma página recuperada não aprova uma
+citação para outra página. Citações inline e repetições na seção **Fontes** são
+registradas separadamente e deduplicadas antes da contagem. Os campos antigos
+`arquivo_correto`, `pagina_correta` e `fonte_correta` permanecem somente como aliases
+legados das métricas de recuperação.
+
+Conceitos esperados podem continuar como texto literal ou declarar alternativas em
+`qualquer_de`. Alternativas numéricas especificam `valor`, `unidade` e `tolerancia`;
+vírgula e ponto decimal são normalizados, mas unidade, sinal e ordem de grandeza são
+preservados. Por exemplo, o caso de amostragem aceita `14 rad/s` ou o valor equivalente
+`2,2282 Hz` dentro da tolerância declarada, sem consultar o Qwen para decidir a métrica.
+
 Valores não aplicáveis ficam como `null` e não entram no denominador. A relação semântica
 entre afirmação, citação e trecho é auditada pelo Qwen e aparece separadamente como
 **métrica auxiliar não independente**. Quando o mesmo `qwen2.5:3b` gera e audita, o
@@ -286,9 +298,16 @@ avaliação rápida de recuperação na interface.
 No modo Fundamentado, o relatório também registra deterministicamente os rótulos `Tn`,
 IDs reais do ChromaDB, evidências `En`, vínculos afirmação→evidência, páginas derivadas,
 IDs inválidos rejeitados, tentativas de misturar arquivos e cobertura de evidências por
-afirmação. No modo Compatibilidade essas métricas ficam como não aplicáveis; eventuais
+afirmação. Também registra quantidades de trechos de suporte, páginas citadas, citações
+únicas e duplicatas removidas. Essas contagens são descritivas e não constituem prova
+automática de minimalidade semântica. No modo Compatibilidade essas métricas estruturais
+ficam como não aplicáveis; eventuais
 vínculos da auditoria são identificados como reconstruídos e não como IDs usados na
-geração. Esses campos foram adicionados de forma compatível ao esquema `2.0`.
+geração.
+
+Os relatórios novos usam o esquema **2.1**, uma extensão aditiva do 2.0. Relatórios
+históricos continuam sendo carregados sem preencher campos ausentes como reprovações e
+nenhum JSON anterior é reescrito.
 
 ## Interface local
 

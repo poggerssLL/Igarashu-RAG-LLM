@@ -52,6 +52,18 @@ class EvidenciaOrganizada:
     ids_chroma: tuple[str, ...]
     arquivo: str
     paginas: tuple[int, ...]
+    trecho_ids_contexto: tuple[str, ...] = ()
+    ids_chroma_contexto: tuple[str, ...] = ()
+    paginas_contexto: tuple[int, ...] = ()
+
+    @property
+    def trecho_ids_suporte(self) -> tuple[str, ...]:
+        """IDs que sustentam a evidência e podem originar citações."""
+        return self.trecho_ids
+
+    @property
+    def ids_chroma_suporte(self) -> tuple[str, ...]:
+        return self.ids_chroma
 
     @property
     def pagina(self) -> int:
@@ -296,7 +308,7 @@ def _evidencia_para_modelo(item: EvidenciaOrganizada) -> dict:
         "tipo": item.tipo,
         "conteudo": item.conteudo,
         "natureza": item.natureza,
-        "trecho_ids": list(item.trecho_ids),
+        "trecho_ids_suporte": list(item.trecho_ids_suporte),
     }
 
 
@@ -376,7 +388,7 @@ def organizar_evidencias(
     por_rotulo = {item.rotulo: item for item in rotulados}
     dados = _json_modelo(
         cliente,
-        "Você é um extrator de evidências. Use somente os trechos identificados por Tn. "
+        "Você é um extrator de evidências atômicas. Use somente os trechos identificados por Tn. "
         "Não responda à pergunta, não crie IDs e não devolva arquivo ou página. "
         "Retorne JSON válido, sem markdown.",
         f"""Pergunta: {pergunta}
@@ -384,13 +396,17 @@ def organizar_evidencias(
 Organize fatos explícitos, definições, fórmulas, condições e limitações.
 Marque natureza como texto_explicito ou deducao_simples. Uma dedução simples deve
 decorrer diretamente das evidências, sem conhecimento externo.
-Cada evidência deve listar em trecho_ids somente rótulos Tn apresentados abaixo.
-Uma evidência pode usar vários trechos quando a informação continua em outra página.
+Cada evidência deve sustentar um fato específico. Em trecho_ids_suporte, liste o menor
+conjunto de rótulos que contém diretamente o fato, definição, fórmula ou condição.
+Trechos úteis apenas para compreensão podem aparecer em trecho_ids_contexto e não
+serão citados nem enviados ao auditor como suporte. Use vários trechos de suporte
+somente quando a afirmação realmente depender da continuação ou combinação deles.
 
 Formato:
 {{"suficiente": true, "informacao_faltante": "", "evidencias": [
   {{"tipo": "fato|definicao|formula|condicao|limitacao", "conteudo": "...",
-    "trecho_ids": ["T1"], "natureza": "texto_explicito|deducao_simples"}}
+    "trecho_ids_suporte": ["T1"], "trecho_ids_contexto": [],
+    "natureza": "texto_explicito|deducao_simples"}}
 ]}}
 
 Trechos:
@@ -402,7 +418,11 @@ Trechos:
         if not isinstance(item, dict):
             continue
         conteudo = str(item.get("conteudo") or "").strip()
-        ids_brutos = item.get("trecho_ids")
+        ids_brutos = item.get("trecho_ids_suporte")
+        if ids_brutos is None:
+            # Compatibilidade com respostas do formato 2.0. Nesse formato,
+            # trecho_ids sempre foi o conjunto que originava as citações.
+            ids_brutos = item.get("trecho_ids")
         if not isinstance(ids_brutos, list):
             diagnostico.evidencias_sem_trecho_rejeitadas += 1
             continue
@@ -420,12 +440,30 @@ Trechos:
         if invalidos:
             diagnostico.trecho_ids_invalidos_rejeitados.extend(invalidos)
             continue
+        contexto_bruto = item.get("trecho_ids_contexto", [])
+        contexto_ids = tuple(
+            dict.fromkeys(
+                str(rotulo).strip()
+                for rotulo in contexto_bruto
+                if str(rotulo).strip() and str(rotulo).strip() not in trecho_ids
+            )
+        ) if isinstance(contexto_bruto, list) else ()
+        invalidos_contexto = [
+            rotulo for rotulo in contexto_ids if rotulo not in por_rotulo
+        ]
+        if invalidos_contexto:
+            diagnostico.trecho_ids_invalidos_rejeitados.extend(invalidos_contexto)
+            continue
         selecionados = [por_rotulo[rotulo] for rotulo in trecho_ids]
-        sem_id_real = [item.rotulo for item in selecionados if not item.id_chroma]
+        contexto = [por_rotulo[rotulo] for rotulo in contexto_ids]
+        todos_selecionados = [*selecionados, *contexto]
+        sem_id_real = [
+            trecho.rotulo for trecho in todos_selecionados if not trecho.id_chroma
+        ]
         if sem_id_real:
             diagnostico.trecho_ids_invalidos_rejeitados.extend(sem_id_real)
             continue
-        arquivos = {item.arquivo for item in selecionados}
+        arquivos = {trecho.arquivo for trecho in todos_selecionados}
         if len(arquivos) != 1:
             diagnostico.tentativas_mistura_arquivos += 1
             continue
@@ -443,6 +481,9 @@ Trechos:
             ids_chroma=tuple(item.id_chroma for item in selecionados),
             arquivo=selecionados[0].arquivo,
             paginas=tuple(dict.fromkeys(item.pagina for item in selecionados)),
+            trecho_ids_contexto=contexto_ids,
+            ids_chroma_contexto=tuple(item.id_chroma for item in contexto),
+            paginas_contexto=tuple(dict.fromkeys(item.pagina for item in contexto)),
         )
         if any(
             similaridade_textual(existente.conteudo, nova.conteudo) >= 0.80

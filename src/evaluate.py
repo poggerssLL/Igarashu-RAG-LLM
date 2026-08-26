@@ -220,6 +220,8 @@ def main() -> int:
                 print(titulo)
                 print("  Métricas determinísticas:")
                 for chave, metrica in metricas["metricas_deterministicas"].items():
+                    if chave in {"arquivo_correto", "pagina_correta", "fonte_correta"}:
+                        continue
                     print(f"    {chave}: {formatar_metrica_agregada(metrica)}")
                 rastreabilidade = metricas[
                     "metricas_rastreabilidade_deterministicas"
@@ -242,6 +244,12 @@ def main() -> int:
                     "afirmacoes_publicadas_sem_evidencia",
                 ):
                     print(f"    {chave}: {rastreabilidade[chave]}")
+                print(
+                    "    citações únicas: "
+                    f"{rastreabilidade['quantidade_citacoes_unicas']} | "
+                    "duplicatas removidas: "
+                    f"{rastreabilidade['citacoes_duplicadas_removidas']}"
+                )
                 auxiliares = metricas["metricas_auxiliares_qwen"]
                 print("  Métricas auxiliares pelo Qwen (não independentes):")
                 print(
@@ -276,8 +284,11 @@ def main() -> int:
                 print(
                     f"{indice}. {'OK' if estado else 'ATENÇÃO'} | {item.pergunta}\n"
                     f"   páginas={list(item.paginas_retornadas)} | documento={item.documento}\n"
-                    f"   arquivo={item.arquivo_correto} página={item.pagina_correta} "
-                    f"fonte={item.fonte_correta} conceitos={item.conceitos_presentes} "
+                    f"   página_recuperada={item.pagina_recuperada} "
+                    f"fonte_recuperada={item.fonte_recuperada} "
+                    f"página_citada={item.citacao_pagina_esperada} "
+                    f"fonte_citada={item.citacao_fonte_esperada} "
+                    f"conceitos={item.conceitos_presentes} "
                     f"citação_formal={item.citacao_formal_valida} "
                     f"citação_recuperada={item.citacao_recuperada} idioma={item.idioma_correto} "
                     f"recusa={item.recusa_correta} não_sustentadas_publicadas={item.nao_sustentadas_publicadas}"
