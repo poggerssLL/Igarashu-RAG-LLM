@@ -644,8 +644,8 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
 
     with aba_geracao:
         st.caption(
-            "Executa sete casos reais e audita a resposta final publicada. A auditoria semântica "
-            "usa o mesmo Qwen e é auxiliar, não uma validação independente."
+            "Executa quinze casos reais com gabarito semântico determinístico. A auditoria pelo "
+            "mesmo Qwen permanece auxiliar e não é uma validação independente."
         )
         comparar = st.checkbox(
             "Executar também o modo Compatibilidade e gerar nova linha de base corrigida",
@@ -725,6 +725,27 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
                 "Citações válidas",
                 exibir_contagem(deterministicas["citacao_recuperada"]),
             )
+            colunas = st.columns(3)
+            colunas[0].metric(
+                "Afirmações obrigatórias",
+                exibir_contagem(
+                    deterministicas["afirmacoes_obrigatorias_presentes"]
+                ),
+            )
+            colunas[1].metric(
+                "Fontes por afirmação",
+                exibir_contagem(deterministicas["fontes_aceitaveis_citadas"]),
+            )
+            colunas[2].metric(
+                "Fórmulas íntegras",
+                exibir_contagem(deterministicas["formulas_integras"]),
+            )
+            omissoes = deterministicas["omissoes_criticas"]
+            st.caption(
+                "Gabarito 2.2: "
+                f"{omissoes['total']} omissão(ões) crítica(s) em "
+                f"{omissoes['casos_aplicaveis']} caso(s) aplicável(is)."
+            )
             if base.get("casos"):
                 det_base = base["metricas_deterministicas"]
                 aux_base = base["metricas_auxiliares_qwen"]
@@ -752,6 +773,18 @@ def pagina_avaliacao(materias: list[Materia], colecao: object | None) -> None:
                         st.write(f"Documento: {item.documento}")
                         st.write(f"Páginas: {list(item.paginas_retornadas)}")
                         st.write(item.resposta)
+                        falhas_semanticas = [
+                            diagnostico
+                            for diagnostico in item.diagnosticos_semanticos
+                            if diagnostico.estado == "reprovado"
+                        ]
+                        if falhas_semanticas:
+                            st.write("Diagnóstico determinístico:")
+                            for diagnostico in falhas_semanticas:
+                                st.write(
+                                    f"- {diagnostico.id}: "
+                                    f"{diagnostico.motivo_deterministico}"
+                                )
 
 
 materias = materias_atuais()

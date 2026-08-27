@@ -38,7 +38,7 @@ from .index_manifest import carregar_manifesto
 ARQUIVO_CASOS_GERACAO = RAIZ_PROJETO / "avaliacao" / "casos_geracao.json"
 ARQUIVO_LINHA_BASE = RAIZ_PROJETO / "avaliacao" / "linha_base_geracao.json"
 PASTA_RESULTADOS_GERACAO = RAIZ_PROJETO / "avaliacao" / "resultados"
-VERSAO_ESQUEMA_AVALIACAO = "2.1"
+VERSAO_ESQUEMA_AVALIACAO = "2.2"
 AVISO_AUDITORIA_QWEN = (
     "A auditoria semântica é uma métrica auxiliar produzida por um LLM local. "
     "Ela não é uma validação independente e não substitui gabarito ou revisão humana."
@@ -112,6 +112,15 @@ class ResultadoGeracao:
     citacoes_duplicadas_removidas: int | None = None
     trechos_suporte_por_afirmacao: tuple[int, ...] | None = None
     paginas_citadas_por_afirmacao: tuple[int, ...] | None = None
+    afirmacoes_obrigatorias_presentes: bool | None = None
+    afirmacoes_proibidas_ausentes: bool | None = None
+    fontes_aceitaveis_citadas: bool | None = None
+    formulas_integras: bool | None = None
+    omissoes_criticas: int | None = None
+    misturas_proibidas_ausentes: bool | None = None
+    requisitos_semanticos_aprovados: int | None = None
+    requisitos_semanticos_aplicaveis: int | None = None
+    diagnosticos_semanticos: tuple[DiagnosticoRequisitoSemantico, ...] = ()
 
     @property
     def recuperou_pagina(self) -> bool | None:
@@ -126,7 +135,7 @@ class ResultadoGeracao:
         return self.citacao_formal_valida and self.citacao_recuperada
 
     @property
-    def metricas_deterministicas(self) -> dict[str, bool | None]:
+    def metricas_deterministicas(self) -> dict[str, bool | int | None]:
         return {
             "arquivo_recuperado": self.arquivo_recuperado,
             "pagina_recuperada": self.pagina_recuperada,
@@ -146,6 +155,20 @@ class ResultadoGeracao:
             "afirmacoes_com_evidencia_valida": self.afirmacoes_com_evidencia_valida,
             "evidencias_com_trechos_validos": self.evidencias_com_trechos_validos,
             "citacoes_derivadas_evidencias": self.citacoes_derivadas_evidencias,
+            "afirmacoes_obrigatorias_presentes": (
+                self.afirmacoes_obrigatorias_presentes
+            ),
+            "afirmacoes_proibidas_ausentes": self.afirmacoes_proibidas_ausentes,
+            "fontes_aceitaveis_citadas": self.fontes_aceitaveis_citadas,
+            "formulas_integras": self.formulas_integras,
+            "omissoes_criticas": self.omissoes_criticas,
+            "misturas_proibidas_ausentes": self.misturas_proibidas_ausentes,
+            "requisitos_semanticos_aprovados": (
+                self.requisitos_semanticos_aprovados
+            ),
+            "requisitos_semanticos_aplicaveis": (
+                self.requisitos_semanticos_aplicaveis
+            ),
         }
 
     @property
@@ -214,6 +237,54 @@ class AnaliseCitacoes:
     duplicadas_removidas: int
 
 
+@dataclass(frozen=True)
+class DiagnosticoRequisitoSemantico:
+    """Resultado explicável de um requisito declarativo do gabarito 2.2."""
+
+    id: str
+    tipo: str
+    estado: str
+    alternativa_encontrada: str | None = None
+    termos_ausentes: tuple[str, ...] = ()
+    fonte_publicada_usada: tuple[str, int] | None = None
+    formula_encontrada: str | None = None
+    afirmacao_publicada: str | None = None
+    motivo_deterministico: str | None = None
+
+    def como_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "tipo": self.tipo,
+            "estado": self.estado,
+            "alternativa_encontrada": self.alternativa_encontrada,
+            "termos_ausentes": list(self.termos_ausentes),
+            "fonte_publicada_usada": (
+                {
+                    "arquivo": self.fonte_publicada_usada[0],
+                    "pagina_pdf": self.fonte_publicada_usada[1],
+                }
+                if self.fonte_publicada_usada is not None
+                else None
+            ),
+            "formula_encontrada": self.formula_encontrada,
+            "afirmacao_publicada": self.afirmacao_publicada,
+            "motivo_deterministico": self.motivo_deterministico,
+        }
+
+
+@dataclass(frozen=True)
+class AvaliacaoSemantica:
+    afirmacoes_obrigatorias_presentes: bool | None = None
+    afirmacoes_proibidas_ausentes: bool | None = None
+    fontes_aceitaveis_citadas: bool | None = None
+    formulas_integras: bool | None = None
+    omissoes_criticas: int | None = None
+    misturas_proibidas_ausentes: bool | None = None
+    requisitos_semanticos_aprovados: int | None = None
+    requisitos_semanticos_aplicaveis: int | None = None
+    diagnosticos: tuple[DiagnosticoRequisitoSemantico, ...] = ()
+
+
 def normalizar(texto: str) -> str:
     texto = unicodedata.normalize("NFKD", texto.casefold())
     texto = "".join(item for item in texto if not unicodedata.combining(item))
@@ -228,10 +299,23 @@ def _normalizar_decimal_textual(texto: str) -> str:
     return re.sub(r"(?<=\d),(?=\d)", ".", normalizar(texto))
 
 
+def _texto_literal_presente(texto: str, termo: str) -> bool:
+    """Procura um termo completo sem aceitar letras dentro de outras palavras."""
+    alvo = _normalizar_decimal_textual(termo)
+    if not alvo:
+        return False
+    padrao = re.escape(alvo).replace(r"\ ", r"\s+")
+    if alvo[0].isalnum() or alvo[0] == "_":
+        padrao = rf"(?<!\w){padrao}"
+    if alvo[-1].isalnum() or alvo[-1] == "_":
+        padrao = rf"{padrao}(?!\w)"
+    return re.search(padrao, _normalizar_decimal_textual(texto)) is not None
+
+
 def _alternativa_presente(texto: str, alternativa: object) -> bool:
     texto_normalizado = _normalizar_decimal_textual(texto)
     if isinstance(alternativa, str):
-        return _normalizar_decimal_textual(alternativa) in texto_normalizado
+        return _texto_literal_presente(texto, alternativa)
     if not isinstance(alternativa, dict):
         return False
     if alternativa.get("texto") is not None:
@@ -261,6 +345,188 @@ def _alternativa_presente(texto: str, alternativa: object) -> bool:
         if abs(valor - esperado) <= tolerancia:
             return True
     return False
+
+
+def _descrever_item(item: object) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        if item.get("texto") is not None:
+            return str(item["texto"])
+        if "valor" in item:
+            unidade = str(item.get("unidade") or "").strip()
+            return f"{item['valor']} {unidade}".strip()
+        if item.get("qualquer_de"):
+            return "qualquer de: " + " | ".join(
+                _descrever_item(valor) for valor in item["qualquer_de"]
+            )
+        if item.get("termos_todos"):
+            return " + ".join(
+                _descrever_item(valor) for valor in item["termos_todos"]
+            )
+    return str(item)
+
+
+def _avaliar_alternativa_textual(
+    texto: str, alternativa: object
+) -> tuple[bool, tuple[str, ...]]:
+    """Avalia uma alternativa e informa os termos atômicos que faltaram."""
+    if isinstance(alternativa, dict) and "termos_todos" in alternativa:
+        termos = alternativa.get("termos_todos")
+        if not isinstance(termos, list) or not termos:
+            return False, ("termos_todos inválido",)
+        ausentes = tuple(
+            _descrever_item(termo)
+            for termo in termos
+            if not _avaliar_alternativa_textual(texto, termo)[0]
+        )
+        return not ausentes, ausentes
+    if isinstance(alternativa, dict) and "qualquer_de" in alternativa:
+        opcoes = alternativa.get("qualquer_de")
+        if not isinstance(opcoes, list) or not opcoes:
+            return False, ("qualquer_de inválido",)
+        resultados = [
+            _avaliar_alternativa_textual(texto, opcao) for opcao in opcoes
+        ]
+        if any(aprovou for aprovou, _ in resultados):
+            return True, ()
+        return min(resultados, key=lambda item: len(item[1]))
+    presente = _alternativa_presente(texto, alternativa)
+    return presente, () if presente else (_descrever_item(alternativa),)
+
+
+def _extrair_grupo_latex(texto: str, inicio: int) -> tuple[str, int] | None:
+    if inicio >= len(texto) or texto[inicio] != "{":
+        return None
+    nivel = 0
+    for indice in range(inicio, len(texto)):
+        if texto[indice] == "{":
+            nivel += 1
+        elif texto[indice] == "}":
+            nivel -= 1
+            if nivel == 0:
+                return texto[inicio + 1 : indice], indice + 1
+    return None
+
+
+def _converter_fracoes_latex(texto: str) -> str:
+    """Converte apenas ``\\frac{a}{b}``, respeitando chaves balanceadas."""
+    resultado: list[str] = []
+    indice = 0
+    while indice < len(texto):
+        if texto.startswith("\\frac", indice):
+            numerador = _extrair_grupo_latex(texto, indice + 5)
+            if numerador is not None:
+                denominador = _extrair_grupo_latex(texto, numerador[1])
+                if denominador is not None:
+                    resultado.append(
+                        "("
+                        + _converter_fracoes_latex(numerador[0])
+                        + ")/("
+                        + _converter_fracoes_latex(denominador[0])
+                        + ")"
+                    )
+                    indice = denominador[1]
+                    continue
+        resultado.append(texto[indice])
+        indice += 1
+    return "".join(resultado)
+
+
+def _pares_parenteses(texto: str) -> dict[int, int]:
+    pilha: list[int] = []
+    pares: dict[int, int] = {}
+    for indice, caractere in enumerate(texto):
+        if caractere == "(":
+            pilha.append(indice)
+        elif caractere == ")" and pilha:
+            abertura = pilha.pop()
+            pares[abertura] = indice
+    return pares
+
+
+def _remover_parenteses_redundantes(texto: str) -> str:
+    anterior = None
+    while texto != anterior:
+        anterior = texto
+        pares = _pares_parenteses(texto)
+        if texto.startswith("(") and pares.get(0) == len(texto) - 1:
+            texto = texto[1:-1]
+            continue
+        texto = re.sub(
+            r"/\(([A-Za-zΑ-ω][A-Za-z0-9_Α-ω]*)\)", r"/\1", texto
+        )
+        pares = _pares_parenteses(texto)
+        for abertura, fechamento in sorted(pares.items(), reverse=True):
+            if (
+                abertura + 1 < len(texto)
+                and texto[abertura + 1] == "("
+                and pares.get(abertura + 1) == fechamento - 1
+            ):
+                texto = texto[:abertura] + texto[abertura + 1 : fechamento] + texto[fechamento + 1 :]
+                break
+    return texto
+
+
+def normalizar_formula(formula: str) -> str:
+    """Normaliza somente apresentação; não executa equivalência algébrica."""
+    texto = unicodedata.normalize("NFKC", formula).translate(
+        str.maketrans(
+            {
+                "−": "-",
+                "–": "-",
+                "—": "-",
+                "×": "*",
+                "·": "*",
+                "⋅": "*",
+                "∞": "infinity",
+            }
+        )
+    )
+    texto = re.sub(r"(?<=\d),(?=\d)", ".", texto)
+    texto = texto.replace("\\dfrac", "\\frac").replace("\\tfrac", "\\frac")
+    texto = texto.replace("\\left", "").replace("\\right", "")
+    texto = _converter_fracoes_latex(texto)
+    substituicoes = {
+        r"\cdot": "*",
+        r"\times": "*",
+        r"\omega": "ω",
+        r"\infty": "infinity",
+        r"\sum": "sum",
+    }
+    for origem, destino in substituicoes.items():
+        texto = texto.replace(origem, destino)
+    texto = re.sub(r"\\(?:mathrm|operatorname|text)\{([^{}]*)\}", r"\1", texto)
+    while re.search(r"([_^])\{([^{}]*)\}", texto):
+        texto = re.sub(r"([_^])\{([^{}]*)\}", r"\1(\2)", texto)
+    texto = texto.replace("{", "(").replace("}", ")")
+    texto = texto.replace("$", "")
+    texto = re.sub(r"\s+", "", texto)
+    texto = texto.replace("*", "")
+    return _remover_parenteses_redundantes(texto)
+
+
+def _formula_presente(texto: str, alternativa: object) -> tuple[bool, str | None]:
+    if isinstance(alternativa, dict) and alternativa.get("texto") is not None:
+        valor = str(alternativa["texto"])
+        return _texto_literal_presente(texto, valor), valor
+    if not isinstance(alternativa, str):
+        return False, None
+    esperado = normalizar_formula(alternativa)
+    publicado = normalizar_formula(texto)
+    if not esperado:
+        return False, None
+    inicio = 0
+    while (posicao := publicado.find(esperado, inicio)) >= 0:
+        antes = publicado[posicao - 1] if posicao else ""
+        depois_indice = posicao + len(esperado)
+        depois = publicado[depois_indice] if depois_indice < len(publicado) else ""
+        antes_valido = not antes or antes not in "0123456789+-*/^<>"
+        depois_valido = not depois or depois not in "0123456789+-*/^=<>"
+        if antes_valido and depois_valido:
+            return True, alternativa
+        inicio = posicao + 1
+    return False, None
 
 
 def avaliar_conceitos(texto: str, conceitos: Sequence[object]) -> bool | None:
@@ -403,6 +669,412 @@ def extrair_afirmacoes_publicadas(resposta: str) -> list[str]:
         partes = re.split(r"(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÀÃÕÂÊÔI])", linha)
         afirmacoes.extend(item.strip() for item in partes if len(item.strip()) >= 3)
     return afirmacoes
+
+
+_CAMPOS_SEMANTICOS = (
+    "afirmacoes_obrigatorias",
+    "afirmacoes_proibidas",
+    "formulas_esperadas",
+    "omissoes_criticas",
+    "misturas_proibidas",
+)
+
+
+def _lista_declarada(caso: dict, campo: str) -> list:
+    valor = caso.get(campo, [])
+    return valor if isinstance(valor, list) else []
+
+
+def _id_requisito(item: object, tipo: str, indice: int) -> str:
+    if isinstance(item, dict) and str(item.get("id") or "").strip():
+        return str(item["id"])
+    return f"{tipo}_{indice}"
+
+
+def _alternativas_requisito(item: object) -> list[object]:
+    if isinstance(item, dict):
+        alternativas = item.get("qualquer_de", [])
+        return alternativas if isinstance(alternativas, list) else []
+    return [item]
+
+
+def _fontes_aceitaveis(item: object) -> set[tuple[str, int]]:
+    if not isinstance(item, dict):
+        return set()
+    fontes: set[tuple[str, int]] = set()
+    for fonte in item.get("fontes_aceitaveis", []):
+        if not isinstance(fonte, dict):
+            continue
+        arquivo = normalizar_caminho(str(fonte.get("arquivo") or ""))
+        if not arquivo:
+            continue
+        for pagina in fonte.get("paginas", []):
+            try:
+                fontes.add((arquivo, int(pagina)))
+            except (TypeError, ValueError):
+                continue
+    return fontes
+
+
+def _melhor_correspondencia(
+    afirmacoes: Sequence[str], alternativas: Sequence[object]
+) -> tuple[str | None, object | None, tuple[str, ...]]:
+    melhor: tuple[str | None, object | None, tuple[str, ...]] = (None, None, ())
+    melhor_tamanho: int | None = None
+    for afirmacao in afirmacoes or ("",):
+        for alternativa in alternativas:
+            presente, ausentes = _avaliar_alternativa_textual(
+                afirmacao, alternativa
+            )
+            if presente:
+                return afirmacao, alternativa, ()
+            if melhor_tamanho is None or len(ausentes) < melhor_tamanho:
+                melhor = (afirmacao or None, alternativa, ausentes)
+                melhor_tamanho = len(ausentes)
+    return melhor
+
+
+def _diagnosticos_nao_aplicaveis(caso: dict) -> tuple[DiagnosticoRequisitoSemantico, ...]:
+    diagnosticos: list[DiagnosticoRequisitoSemantico] = []
+    tipos = (
+        ("afirmacoes_obrigatorias", "afirmacao_obrigatoria"),
+        ("afirmacoes_proibidas", "afirmacao_proibida"),
+        ("formulas_esperadas", "formula_esperada"),
+        ("omissoes_criticas", "omissao_critica"),
+        ("misturas_proibidas", "mistura_proibida"),
+    )
+    for campo, tipo in tipos:
+        for indice, item in enumerate(_lista_declarada(caso, campo), start=1):
+            diagnosticos.append(
+                DiagnosticoRequisitoSemantico(
+                    id=_id_requisito(item, tipo, indice),
+                    tipo=tipo,
+                    estado="N/A",
+                    motivo_deterministico="Resposta esperada é uma recusa; requisito não aplicável.",
+                )
+            )
+    return tuple(diagnosticos)
+
+
+def avaliar_requisitos_semanticos(
+    caso: dict,
+    resposta: str,
+    trechos: Sequence[TrechoRecuperado],
+    *,
+    aplicavel: bool,
+) -> AvaliacaoSemantica:
+    """Avalia o gabarito 2.2 por afirmação, sem consultar um LLM."""
+    if not any(campo in caso for campo in _CAMPOS_SEMANTICOS):
+        return AvaliacaoSemantica()
+    if not aplicavel:
+        return AvaliacaoSemantica(
+            diagnosticos=_diagnosticos_nao_aplicaveis(caso)
+        )
+
+    afirmacoes_publicadas = extrair_afirmacoes_publicadas(resposta)
+    obrigatorias = _lista_declarada(caso, "afirmacoes_obrigatorias")
+    proibidas = _lista_declarada(caso, "afirmacoes_proibidas")
+    formulas = _lista_declarada(caso, "formulas_esperadas")
+    omissoes = _lista_declarada(caso, "omissoes_criticas")
+    misturas = _lista_declarada(caso, "misturas_proibidas")
+    omissoes_por_afirmacao: dict[str, list[object]] = {}
+    for omissao in omissoes:
+        if isinstance(omissao, dict):
+            referencia = str(omissao.get("afirmacao_id") or "").strip()
+            if referencia:
+                omissoes_por_afirmacao.setdefault(referencia, []).append(omissao)
+
+    recuperadas = {
+        (normalizar_caminho(trecho.arquivo), trecho.pagina) for trecho in trechos
+    }
+    diagnosticos: list[DiagnosticoRequisitoSemantico] = []
+    conteudos_obrigatorios: list[bool] = []
+    fontes_obrigatorias: list[bool] = []
+    correspondencias_por_id: dict[str, list[tuple[str, object]]] = {}
+
+    for indice, requisito in enumerate(obrigatorias, start=1):
+        requisito_id = _id_requisito(requisito, "afirmacao_obrigatoria", indice)
+        alternativas = _alternativas_requisito(requisito)
+        correspondencias: list[tuple[str, object]] = []
+        for afirmacao in afirmacoes_publicadas:
+            for alternativa in alternativas:
+                presente, _ = _avaliar_alternativa_textual(
+                    afirmacao, alternativa
+                )
+                if presente:
+                    correspondencias.append((afirmacao, alternativa))
+        correspondencias_por_id[requisito_id] = correspondencias
+
+        omissoes_relacionadas = omissoes_por_afirmacao.get(requisito_id, [])
+        completas: list[tuple[str, object]] = []
+        termos_ausentes: tuple[str, ...] = ()
+        for afirmacao, alternativa in correspondencias:
+            ausentes_nesta: list[str] = []
+            for omissao in omissoes_relacionadas:
+                termos = (
+                    omissao.get("termos_todos", [])
+                    if isinstance(omissao, dict)
+                    else []
+                )
+                _, ausentes = _avaliar_alternativa_textual(
+                    afirmacao, {"termos_todos": termos}
+                )
+                ausentes_nesta.extend(ausentes)
+            if not ausentes_nesta:
+                completas.append((afirmacao, alternativa))
+            elif not termos_ausentes or len(ausentes_nesta) < len(termos_ausentes):
+                termos_ausentes = tuple(dict.fromkeys(ausentes_nesta))
+
+        conteudo_aprovado = bool(completas)
+        conteudos_obrigatorios.append(conteudo_aprovado)
+        fontes = _fontes_aceitaveis(requisito)
+        fonte_usada: tuple[str, int] | None = None
+        afirmacao_escolhida: str | None = None
+        alternativa_escolhida: object | None = None
+        # A correção da fonte é independente da completude dos modificadores:
+        # ela deve estar na afirmação-base correspondente, não em outra frase.
+        for afirmacao, alternativa in correspondencias:
+            citadas = {
+                (normalizar_caminho(arquivo), pagina): (arquivo, pagina)
+                for arquivo, pagina in extrair_citacoes(afirmacao)
+            }
+            for fonte in fontes.intersection(recuperadas).intersection(citadas):
+                fonte_usada = citadas[fonte]
+                afirmacao_escolhida = afirmacao
+                alternativa_escolhida = alternativa
+                break
+            if fonte_usada is not None:
+                break
+        fonte_aprovada = fonte_usada is not None if fontes else True
+        if fontes:
+            fontes_obrigatorias.append(fonte_aprovada)
+
+        if afirmacao_escolhida is None and completas:
+            afirmacao_escolhida, alternativa_escolhida = completas[0]
+        elif afirmacao_escolhida is None and correspondencias:
+            afirmacao_escolhida, alternativa_escolhida = correspondencias[0]
+        if not correspondencias:
+            afirmacao_escolhida, alternativa_escolhida, termos_ausentes = (
+                _melhor_correspondencia(afirmacoes_publicadas, alternativas)
+            )
+
+        motivos: list[str] = []
+        if not correspondencias:
+            motivos.append(
+                "Nenhuma alternativa declarada foi encontrada em uma única afirmação publicada."
+            )
+        elif not conteudo_aprovado:
+            motivos.append(
+                "Modificador crítico ausente na mesma afirmação: "
+                + ", ".join(termos_ausentes)
+                + "."
+            )
+        if fontes and not fonte_aprovada:
+            citadas_aceitaveis = {
+                (normalizar_caminho(arquivo), pagina)
+                for afirmacao, _ in correspondencias
+                for arquivo, pagina in extrair_citacoes(afirmacao)
+            }.intersection(fontes)
+            if citadas_aceitaveis and not citadas_aceitaveis.intersection(recuperadas):
+                motivos.append(
+                    "A fonte aceitável citada na afirmação não pertence à recuperação."
+                )
+            else:
+                motivos.append(
+                    "Nenhuma fonte aceitável recuperada foi citada na mesma afirmação."
+                )
+        aprovado = conteudo_aprovado and fonte_aprovada
+        diagnosticos.append(
+            DiagnosticoRequisitoSemantico(
+                id=requisito_id,
+                tipo="afirmacao_obrigatoria",
+                estado="aprovado" if aprovado else "reprovado",
+                alternativa_encontrada=(
+                    _descrever_item(alternativa_escolhida)
+                    if alternativa_escolhida is not None and correspondencias
+                    else None
+                ),
+                termos_ausentes=termos_ausentes,
+                fonte_publicada_usada=fonte_usada,
+                afirmacao_publicada=afirmacao_escolhida,
+                motivo_deterministico=" ".join(motivos) or None,
+            )
+        )
+
+    omissoes_detectadas = 0
+    for indice, omissao in enumerate(omissoes, start=1):
+        omissao_id = _id_requisito(omissao, "omissao_critica", indice)
+        referencia = (
+            str(omissao.get("afirmacao_id") or "")
+            if isinstance(omissao, dict)
+            else ""
+        )
+        termos = (
+            omissao.get("termos_todos", [])
+            if isinstance(omissao, dict)
+            else []
+        )
+        correspondencias = correspondencias_por_id.get(referencia, [])
+        aprovada = False
+        melhor_afirmacao: str | None = None
+        melhores_ausentes = tuple(_descrever_item(item) for item in termos)
+        for afirmacao, _ in correspondencias:
+            presente, ausentes = _avaliar_alternativa_textual(
+                afirmacao, {"termos_todos": termos}
+            )
+            if presente:
+                aprovada = True
+                melhor_afirmacao = afirmacao
+                melhores_ausentes = ()
+                break
+            if melhor_afirmacao is None or len(ausentes) < len(melhores_ausentes):
+                melhor_afirmacao = afirmacao
+                melhores_ausentes = ausentes
+        if not aprovada:
+            omissoes_detectadas += 1
+        diagnosticos.append(
+            DiagnosticoRequisitoSemantico(
+                id=omissao_id,
+                tipo="omissao_critica",
+                estado="aprovado" if aprovada else "reprovado",
+                termos_ausentes=melhores_ausentes,
+                afirmacao_publicada=melhor_afirmacao,
+                motivo_deterministico=(
+                    None
+                    if aprovada
+                    else (
+                        "A afirmação de referência não foi encontrada."
+                        if not correspondencias
+                        else "Modificador crítico ausente na afirmação de referência."
+                    )
+                ),
+            )
+        )
+
+    proibidas_ausentes: list[bool] = []
+    for indice, requisito in enumerate(proibidas, start=1):
+        requisito_id = _id_requisito(requisito, "afirmacao_proibida", indice)
+        afirmacao, alternativa, _ = _melhor_correspondencia(
+            afirmacoes_publicadas, _alternativas_requisito(requisito)
+        )
+        encontrada = False
+        if afirmacao is not None and alternativa is not None:
+            encontrada, _ = _avaliar_alternativa_textual(
+                afirmacao, alternativa
+            )
+        proibidas_ausentes.append(not encontrada)
+        diagnosticos.append(
+            DiagnosticoRequisitoSemantico(
+                id=requisito_id,
+                tipo="afirmacao_proibida",
+                estado="reprovado" if encontrada else "aprovado",
+                alternativa_encontrada=(
+                    _descrever_item(alternativa) if encontrada else None
+                ),
+                afirmacao_publicada=afirmacao if encontrada else None,
+                motivo_deterministico=(
+                    "Afirmação proibida encontrada na resposta publicada."
+                    if encontrada
+                    else None
+                ),
+            )
+        )
+
+    corpo = remover_secao_fontes(resposta)
+    formulas_aprovadas: list[bool] = []
+    for indice, requisito in enumerate(formulas, start=1):
+        requisito_id = _id_requisito(requisito, "formula_esperada", indice)
+        alternativas = _alternativas_requisito(requisito)
+        encontrada: str | None = None
+        for alternativa in alternativas:
+            presente, formula_encontrada = _formula_presente(corpo, alternativa)
+            if presente:
+                encontrada = formula_encontrada
+                break
+        variaveis = (
+            requisito.get("variaveis_obrigatorias", [])
+            if isinstance(requisito, dict)
+            else []
+        )
+        ausentes = tuple(
+            str(variavel)
+            for variavel in variaveis
+            if encontrada is not None
+            and normalizar_formula(str(variavel))
+            not in normalizar_formula(encontrada)
+        )
+        aprovada = encontrada is not None and not ausentes
+        formulas_aprovadas.append(aprovada)
+        diagnosticos.append(
+            DiagnosticoRequisitoSemantico(
+                id=requisito_id,
+                tipo="formula_esperada",
+                estado="aprovado" if aprovada else "reprovado",
+                termos_ausentes=ausentes,
+                formula_encontrada=encontrada,
+                motivo_deterministico=(
+                    None
+                    if aprovada
+                    else (
+                        "Variável obrigatória ausente da fórmula encontrada."
+                        if encontrada is not None
+                        else "Nenhuma forma declarada com estrutura matemática íntegra foi encontrada."
+                    )
+                ),
+            )
+        )
+
+    misturas_ausentes: list[bool] = []
+    for indice, requisito in enumerate(misturas, start=1):
+        requisito_id = _id_requisito(requisito, "mistura_proibida", indice)
+        alternativas = _alternativas_requisito(requisito)
+        afirmacao, alternativa, _ = _melhor_correspondencia(
+            afirmacoes_publicadas, alternativas
+        )
+        encontrada = False
+        if afirmacao is not None and alternativa is not None:
+            encontrada, _ = _avaliar_alternativa_textual(
+                afirmacao, alternativa
+            )
+        misturas_ausentes.append(not encontrada)
+        diagnosticos.append(
+            DiagnosticoRequisitoSemantico(
+                id=requisito_id,
+                tipo="mistura_proibida",
+                estado="reprovado" if encontrada else "aprovado",
+                alternativa_encontrada=(
+                    _descrever_item(alternativa) if encontrada else None
+                ),
+                afirmacao_publicada=afirmacao if encontrada else None,
+                motivo_deterministico=(
+                    "Mistura terminológica proibida encontrada."
+                    if encontrada
+                    else None
+                ),
+            )
+        )
+
+    aplicaveis = len(diagnosticos)
+    aprovados = sum(item.estado == "aprovado" for item in diagnosticos)
+    return AvaliacaoSemantica(
+        afirmacoes_obrigatorias_presentes=(
+            all(conteudos_obrigatorios) if obrigatorias else None
+        ),
+        afirmacoes_proibidas_ausentes=(
+            all(proibidas_ausentes) if proibidas else None
+        ),
+        fontes_aceitaveis_citadas=(
+            all(fontes_obrigatorias) if fontes_obrigatorias else None
+        ),
+        formulas_integras=all(formulas_aprovadas) if formulas else None,
+        omissoes_criticas=omissoes_detectadas,
+        misturas_proibidas_ausentes=(
+            all(misturas_ausentes) if misturas else None
+        ),
+        requisitos_semanticos_aprovados=aprovados,
+        requisitos_semanticos_aplicaveis=aplicaveis,
+        diagnosticos=tuple(diagnosticos),
+    )
 
 
 def auditar_resposta_publicada(
@@ -822,6 +1494,12 @@ def avaliar_saida(
     analise_citacoes = analisar_citacoes(
         resposta, trechos, aplicavel=espera_resposta
     )
+    avaliacao_semantica = avaliar_requisitos_semanticos(
+        caso,
+        resposta,
+        trechos,
+        aplicavel=espera_resposta,
+    )
     citacao_pagina_esperada = (
         any(pagina in esperadas for _, pagina in analise_citacoes.unicas)
         if espera_resposta and esperadas
@@ -874,6 +1552,15 @@ def avaliar_saida(
         "arquivo": arquivo_esperado,
         "paginas_esperadas": sorted(esperadas),
         "conceitos_esperados": conceitos,
+        "afirmacoes_obrigatorias": _lista_declarada(
+            caso, "afirmacoes_obrigatorias"
+        ),
+        "afirmacoes_proibidas": _lista_declarada(caso, "afirmacoes_proibidas"),
+        "formulas_esperadas": _lista_declarada(caso, "formulas_esperadas"),
+        "omissoes_criticas": _lista_declarada(caso, "omissoes_criticas"),
+        "misturas_proibidas": _lista_declarada(caso, "misturas_proibidas"),
+        "resposta_esperada": caso.get("resposta_esperada"),
+        "valor_esperado": caso.get("valor_esperado"),
         "idioma": caso.get("idioma", "Português"),
         "espera_recusa": espera_recusa,
     }
@@ -973,18 +1660,73 @@ def avaliar_saida(
             if rastreabilidade["paginas_citadas_por_afirmacao"] is not None
             else None
         ),
+        afirmacoes_obrigatorias_presentes=(
+            avaliacao_semantica.afirmacoes_obrigatorias_presentes
+        ),
+        afirmacoes_proibidas_ausentes=(
+            avaliacao_semantica.afirmacoes_proibidas_ausentes
+        ),
+        fontes_aceitaveis_citadas=(
+            avaliacao_semantica.fontes_aceitaveis_citadas
+        ),
+        formulas_integras=avaliacao_semantica.formulas_integras,
+        omissoes_criticas=avaliacao_semantica.omissoes_criticas,
+        misturas_proibidas_ausentes=(
+            avaliacao_semantica.misturas_proibidas_ausentes
+        ),
+        requisitos_semanticos_aprovados=(
+            avaliacao_semantica.requisitos_semanticos_aprovados
+        ),
+        requisitos_semanticos_aplicaveis=(
+            avaliacao_semantica.requisitos_semanticos_aplicaveis
+        ),
+        diagnosticos_semanticos=avaliacao_semantica.diagnosticos,
     )
 
 
 def resultado_aprovado(resultado: ResultadoGeracao) -> bool:
+    campos_booleanos = [
+        "arquivo_recuperado",
+        "pagina_recuperada",
+        "fonte_recuperada",
+        "citacao_pagina_esperada",
+        "citacao_fonte_esperada",
+        "arquivo_correto",
+        "pagina_correta",
+        "fonte_correta",
+        "conceitos_presentes",
+        "citacao_formal_valida",
+        "citacao_recuperada",
+        "citacoes_validas",
+        "recusa_correta",
+        "idioma_correto",
+        "resposta_presente",
+        "afirmacoes_com_evidencia_valida",
+        "evidencias_com_trechos_validos",
+        "citacoes_derivadas_evidencias",
+        "afirmacoes_obrigatorias_presentes",
+        "afirmacoes_proibidas_ausentes",
+        "fontes_aceitaveis_citadas",
+        "formulas_integras",
+        "misturas_proibidas_ausentes",
+    ]
+    if resultado.requisitos_semanticos_aplicaveis is not None:
+        # No esquema 2.2 o gabarito estruturado substitui a busca textual fraca
+        # como gate, mas conceitos_presentes continua no relatório por compatibilidade.
+        campos_booleanos.remove("conceitos_presentes")
     deterministicas = [
-        valor for valor in resultado.metricas_deterministicas.values()
-        if valor is not None
+        getattr(resultado, campo)
+        for campo in campos_booleanos
+        if getattr(resultado, campo) is not None
     ]
     return (
         all(deterministicas)
-        and resultado.citacao_sustenta_afirmacao is not False
-        and resultado.nao_sustentadas_publicadas == 0
+        and resultado.omissoes_criticas in {None, 0}
+        and (
+            resultado.requisitos_semanticos_aplicaveis is None
+            or resultado.requisitos_semanticos_aprovados
+            == resultado.requisitos_semanticos_aplicaveis
+        )
         and resultado.tentativas_evidencia_inexistente in {None, 0}
         and resultado.tentativas_trecho_inexistente in {None, 0}
         and resultado.tentativas_mistura_arquivos in {None, 0}
@@ -1026,11 +1768,30 @@ def resumo_metricas(resultados: Sequence[ResultadoGeracao]) -> dict:
         "afirmacoes_com_evidencia_valida",
         "evidencias_com_trechos_validos",
         "citacoes_derivadas_evidencias",
+        "afirmacoes_obrigatorias_presentes",
+        "afirmacoes_proibidas_ausentes",
+        "fontes_aceitaveis_citadas",
+        "formulas_integras",
+        "misturas_proibidas_ausentes",
     )
     deterministicas = {
         nome: _agregar_booleanos(resultados, nome)
         for nome in nomes_deterministicos
     }
+    for nome in (
+        "omissoes_criticas",
+        "requisitos_semanticos_aprovados",
+        "requisitos_semanticos_aplicaveis",
+    ):
+        valores = [
+            getattr(item, nome)
+            for item in resultados
+            if getattr(item, nome) is not None
+        ]
+        deterministicas[nome] = {
+            "total": sum(valores),
+            "casos_aplicaveis": len(valores),
+        }
     citacao_semantica = _agregar_booleanos(
         resultados, "citacao_sustenta_afirmacao"
     )
@@ -1285,6 +2046,10 @@ def serializar_resultado(item: ResultadoGeracao) -> dict:
             _serializar_afirmacao(afirmacao)
             for afirmacao in item.afirmacoes_auditadas
         ],
+        "diagnostico_semantico": [
+            diagnostico.como_dict()
+            for diagnostico in item.diagnosticos_semanticos
+        ],
         "rastreabilidade": {
             "origem_vinculos": item.origem_vinculos_evidencia,
             "afirmacao_para_evidencias": [
@@ -1377,6 +2142,14 @@ def criar_relatorio_detalhado(
                 "pagina_correta": "pagina_recuperada",
                 "fonte_correta": "fonte_recuperada",
             },
+            "gabarito_semantico_estruturado": {
+                "afirmacoes_obrigatorias_presentes": "cada fato e seus modificadores críticos aparecem em uma única afirmação publicada",
+                "afirmacoes_proibidas_ausentes": "nenhuma generalização ou afirmação proibida declarada aparece na resposta",
+                "fontes_aceitaveis_citadas": "uma fonte aceitável recuperada é citada na mesma afirmação que contém o fato",
+                "formulas_integras": "uma forma declarada preserva a estrutura matemática esperada",
+                "omissoes_criticas": "quantidade de modificadores críticos ausentes da afirmação de referência",
+                "misturas_proibidas_ausentes": "nenhuma mistura terminológica declarada aparece na resposta",
+            },
         },
         "casos": [serializar_resultado(item) for item in resultados],
         "observacoes_e_limitacoes": [
@@ -1384,9 +2157,10 @@ def criar_relatorio_detalhado(
             "Métricas determinísticas não aplicáveis são registradas como null e excluídas dos denominadores.",
             "Frases programáticas de recusa são registradas como texto publicado, mas avaliadas por recusa_correta em vez da auditoria factual do Qwen.",
             "No modo Fundamentado, citações são derivadas de IDs validados; no modo Compatibilidade, vínculos pós-publicação são apenas reconstruções auxiliares.",
-            "O esquema 2.1 adiciona métricas inequívocas de recuperação e citação publicada, preservando aliases legados de recuperação.",
+            "O esquema 2.2 adiciona gabarito semântico por afirmação, fontes alternativas e validação conservadora de fórmulas sem remover campos 2.1.",
             "Trechos de contexto não originam citações e não são apresentados ao auditor como suporte factual.",
-            "A atomicidade semântica do suporte é orientada ao Qwen; as contagens de trechos e páginas são descritivas, não prova de minimalidade.",
+            "O gabarito 2.2 valida atomicidade textual deterministicamente; a auditoria factual de suporte do Qwen permanece auxiliar.",
+            "As contagens de trechos e páginas são descritivas, não prova de minimalidade.",
             "O arquivo avaliacao/linha_base_geracao.json pertence ao esquema anterior e não é comparável diretamente.",
         ],
     }
@@ -1552,6 +2326,11 @@ def executar_avaliacao_geracao(
 
 
 def formatar_metrica_agregada(metrica: dict) -> str:
+    if "total" in metrica:
+        casos = int(metrica.get("casos_aplicaveis") or 0)
+        if not casos:
+            return "não aplicável"
+        return f"{int(metrica.get('total') or 0)} em {casos} casos aplicáveis"
     aplicaveis = int(metrica.get("aplicaveis") or 0)
     acertos = int(metrica.get("acertos") or 0)
     if not aplicaveis:

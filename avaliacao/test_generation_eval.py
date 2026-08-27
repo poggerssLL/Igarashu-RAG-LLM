@@ -8,12 +8,16 @@ from src.chat import TrechoRecuperado
 from src.generation_eval import (
     auditar_resposta_publicada,
     avaliar_conceitos,
+    avaliar_requisitos_semanticos,
     avaliar_rastreabilidade_estrutural,
     avaliar_idioma,
     avaliar_saida,
     carregar_relatorio_detalhado,
     metadados_auditoria,
+    normalizar_formula,
+    resultado_aprovado,
     resumo_metricas,
+    serializar_resultado,
     salvar_resultados_detalhados,
 )
 from src.grounded import (
@@ -112,6 +116,82 @@ def resposta_citada(arquivo: str = ARQUIVO, pagina: int = 42) -> str:
         f"[{arquivo}, página do PDF {pagina}]\n\n"
         f"Fontes\n- [{arquivo}, página do PDF {pagina}]"
     )
+
+
+def caso_periodo_semantico() -> dict:
+    return caso_resposta() | {
+        "pergunta": "Como se define o período fundamental discreto?",
+        "paginas_esperadas": [43, 242],
+        "afirmacoes_obrigatorias": [
+            {
+                "id": "definicao_periodo_fundamental",
+                "qualquer_de": [
+                    {
+                        "termos_todos": [
+                            "período fundamental",
+                            "menor",
+                            "positivo",
+                            "N",
+                        ]
+                    }
+                ],
+                "fontes_aceitaveis": [
+                    {"arquivo": ARQUIVO, "paginas": [43, 242]}
+                ],
+            }
+        ],
+        "omissoes_criticas": [
+            {
+                "id": "periodo_deve_ser_inteiro",
+                "afirmacao_id": "definicao_periodo_fundamental",
+                "termos_todos": ["inteiro"],
+            }
+        ],
+        "afirmacoes_proibidas": [
+            {
+                "id": "generalizacao_exponencial",
+                "qualquer_de": [
+                    {
+                        "termos_todos": [
+                            "todo sinal periódico",
+                            "exponencial complexo",
+                        ]
+                    },
+                    "sinais periódicos são complexos exponenciais",
+                ],
+            }
+        ],
+        "misturas_proibidas": ["tempo shift", "periodic sinal"],
+    }
+
+
+def resposta_periodo(pagina: int = 43, *, inteiro: bool = True) -> str:
+    modificador = "inteiro positivo" if inteiro else "valor positivo"
+    return (
+        f"O período fundamental é o menor {modificador} de N para o qual "
+        f"x[n] = x[n + N]. [{ARQUIVO}, página do PDF {pagina}]"
+    )
+
+
+def caso_formula_zoh() -> dict:
+    return caso_resposta() | {
+        "pergunta": "Qual é a função do ZOH?",
+        "paginas_esperadas": [21],
+        "afirmacoes_obrigatorias": [],
+        "afirmacoes_proibidas": [],
+        "omissoes_criticas": [],
+        "misturas_proibidas": [],
+        "formulas_esperadas": [
+            {
+                "id": "funcao_zoh",
+                "qualquer_de": [
+                    "(1-e^(-Ts))/s",
+                    r"\frac{1-e^{-Ts}}{s}",
+                ],
+                "variaveis_obrigatorias": ["T", "s"],
+            }
+        ],
+    }
 
 
 def avaliar(
@@ -507,7 +587,7 @@ def test_serializacao_do_relatorio_detalhado(tmp_path):
         data_utc=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
     )
     dados = json.loads(destino.read_text(encoding="utf-8"))
-    assert dados["versao_esquema"] == "2.1"
+    assert dados["versao_esquema"] == "2.2"
     assert dados["ambiente"]["sistema_operacional"]
     assert dados["modelos"]["avaliacao_independente"] is False
     assert dados["casos"][0]["resposta_final"] == resposta_citada()
@@ -638,3 +718,382 @@ def test_recusa_publicada_e_registrada_mas_nao_auditada_como_fato(monkeypatch):
     assert chamado is False
     assert resultado.afirmacoes_publicadas == (resposta,)
     assert resultado.nao_sustentadas_publicadas == 0
+
+
+def test_pagina_242_e_aceita_como_fonte_alternativa_legitima():
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=242)],
+        resposta=resposta_periodo(242),
+        afirmacoes=[afirmacao(pagina=242)],
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+    assert resultado.fontes_aceitaveis_citadas is True
+    assert resultado.omissoes_criticas == 0
+
+
+def test_pagina_recuperada_mas_nao_citada_nao_aprova_requisito():
+    resposta = (
+        "O período fundamental é o menor inteiro positivo de N para o qual "
+        "x[n] = x[n + N]."
+    )
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=242)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+    assert resultado.fontes_aceitaveis_citadas is False
+
+
+def test_fonte_citada_na_afirmacao_errada_nao_aprova_requisito():
+    resposta = (
+        "O período fundamental é o menor inteiro positivo de N. "
+        f"Outro conceito usa N como índice. [{ARQUIVO}, página do PDF 242]"
+    )
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=242)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+    assert resultado.citacao_fonte_esperada is True
+    assert resultado.fontes_aceitaveis_citadas is False
+
+
+def test_menor_valor_positivo_falha_sem_modificador_inteiro():
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta_periodo(43, inteiro=False),
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is False
+    assert resultado.fontes_aceitaveis_citadas is True
+    assert resultado.omissoes_criticas == 1
+    diagnostico = next(
+        item
+        for item in resultado.diagnosticos_semanticos
+        if item.id == "periodo_deve_ser_inteiro"
+    )
+    assert diagnostico.termos_ausentes == ("inteiro",)
+
+
+def test_menor_inteiro_positivo_aprova_modificador_critico():
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta_periodo(43),
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+    assert resultado.omissoes_criticas == 0
+
+
+def test_generalizacao_de_sinal_periodico_e_reprovada():
+    resposta = (
+        resposta_periodo(43)
+        + " Todo sinal periódico é exponencial complexo."
+    )
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_proibidas_ausentes is False
+    assert any(
+        item.id == "generalizacao_exponencial" and item.estado == "reprovado"
+        for item in resultado.diagnosticos_semanticos
+    )
+
+
+def test_generalizacao_com_ordem_complexos_exponenciais_e_reprovada():
+    resposta = (
+        resposta_periodo(43)
+        + " Os sinais periódicos são complexos exponenciais."
+    )
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_proibidas_ausentes is False
+
+
+def test_flexao_plural_e_variacao_iguais_apos_aprovam_definicao():
+    caso = json.loads(
+        (Path(__file__).parent / "casos_geracao.json").read_text(encoding="utf-8")
+    )[0]
+    resposta = (
+        "Os sinais periódicos são iguais após um deslocamento de período T. "
+        f"[{caso['arquivo']}, página do PDF 43]"
+    )
+    resultado = avaliar(
+        caso=caso,
+        trechos=[trecho(arquivo=caso["arquivo"], pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+    assert resultado.fontes_aceitaveis_citadas is True
+    assert resultado.omissoes_criticas == 0
+
+
+def test_explicacao_correta_sobre_exponencial_periodico_nao_e_proibida():
+    resposta = (
+        resposta_periodo(43)
+        + " Alguns exponenciais complexos de tempo discreto são periódicos "
+        "quando sua frequência satisfaz a condição apropriada."
+    )
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_proibidas_ausentes is True
+
+
+@pytest.mark.parametrize("mistura", ("tempo shift", "periodic sinal"))
+def test_mistura_terminologica_declarada_e_reprovada(mistura):
+    resposta = resposta_periodo(43) + f" O conceito usa {mistura}."
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.misturas_proibidas_ausentes is False
+
+
+def test_formula_zoh_linear_e_integra():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = (1 - e^(-T s)) / s.",
+    )
+
+    assert resultado.formulas_integras is True
+
+
+def test_formula_zoh_latex_e_integra():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta=r"$G_{zoh}(s) = \frac{1-e^{-Ts}}{s}$.",
+    )
+
+    assert resultado.formulas_integras is True
+    assert normalizar_formula(r"\frac{1-e^{-Ts}}{s}") == normalizar_formula(
+        "(1-e^(-Ts))/s"
+    )
+
+
+def test_formula_zoh_sem_denominador_e_reprovada():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = 1 - e^(-Ts).",
+    )
+
+    assert resultado.formulas_integras is False
+
+
+@pytest.mark.parametrize(
+    "formula",
+    ("(1-e^(-T))/s", "(1-e^(Ts))/s", "1-e-Ts/s"),
+)
+def test_formula_zoh_com_expoente_ou_sinal_incorreto_e_reprovada(formula):
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta=f"Gzoh(s) = {formula}.",
+    )
+
+    assert resultado.formulas_integras is False
+
+
+def test_formula_zoh_corrompida_pelo_ocr_e_reprovada():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = 1 − ϵ − T s s.",
+    )
+
+    assert resultado.formulas_integras is False
+
+
+def test_formula_zoh_com_termo_extra_nao_e_equivalente():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = (1-e^(-Ts))/s + 1.",
+    )
+
+    assert resultado.formulas_integras is False
+
+
+def test_formula_zoh_aceita_parenteses_redundantes_e_multiplicacao_unicode():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = (((1-e^(-T×s))/s)).",
+    )
+
+    assert resultado.formulas_integras is True
+
+
+def test_termos_espalhados_em_afirmacoes_nao_aprovam_requisito():
+    caso = caso_periodo_semantico()
+    resposta = (
+        "O período fundamental é o menor valor. "
+        f"N deve ser inteiro positivo. [{ARQUIVO}, página do PDF 43]"
+    )
+    resultado = avaliar(
+        caso=caso,
+        trechos=[trecho(pagina=43)],
+        resposta=resposta,
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is False
+
+
+def test_recusa_mantem_metricas_semanticas_nao_aplicaveis():
+    caso = caso_periodo_semantico() | {
+        "paginas_esperadas": [],
+        "conceitos_esperados": [],
+        "espera_recusa": True,
+    }
+    resultado = avaliar(
+        caso=caso,
+        resposta="Não encontrei evidência suficiente no material para responder.",
+        afirmacoes=[],
+        insuficiente=True,
+    )
+
+    assert resultado.afirmacoes_obrigatorias_presentes is None
+    assert resultado.fontes_aceitaveis_citadas is None
+    assert resultado.formulas_integras is None
+    assert resultado.omissoes_criticas is None
+    assert resultado.requisitos_semanticos_aplicaveis is None
+    assert {item.estado for item in resultado.diagnosticos_semanticos} == {"N/A"}
+
+
+def test_caso_antigo_sem_esquema_semantico_continua_funcionando():
+    resultado = avaliar(caso=caso_resposta())
+
+    assert resultado.conceitos_presentes is True
+    assert resultado.afirmacoes_obrigatorias_presentes is None
+    assert resultado.requisitos_semanticos_aplicaveis is None
+
+
+def test_auditoria_qwen_auxiliar_nao_decide_aprovacao_deterministica():
+    resultado = avaliar(afirmacoes=[afirmacao("não sustentada")])
+
+    assert resultado.citacao_sustenta_afirmacao is False
+    assert resultado_aprovado(resultado) is True
+
+
+def test_resumo_agrega_contagens_semanticas_sem_trata_las_como_booleanos():
+    resultado = avaliar(
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta_periodo(43, inteiro=False),
+    )
+
+    metricas = resumo_metricas([resultado])["metricas_deterministicas"]
+    assert metricas["omissoes_criticas"] == {
+        "total": 1,
+        "casos_aplicaveis": 1,
+    }
+    assert metricas["requisitos_semanticos_aplicaveis"]["total"] > 0
+
+
+@pytest.mark.parametrize("versao", ("2.0", "2.1"))
+def test_relatorios_historicos_carregam_e_serializam_sem_novos_campos(
+    tmp_path, versao
+):
+    caminho = tmp_path / f"relatorio-{versao}.json"
+    original = {
+        "versao_esquema": versao,
+        "metricas": {"metricas_deterministicas": {"pagina_correta": True}},
+    }
+    caminho.write_text(json.dumps(original), encoding="utf-8")
+
+    carregado = carregar_relatorio_detalhado(caminho)
+
+    assert carregado == original
+    assert json.loads(json.dumps(carregado)) == original
+
+
+def test_modo_compatibilidade_preserva_metricas_estruturais_indisponiveis():
+    resultado = avaliar(
+        modo="compatibilidade",
+        caso=caso_periodo_semantico(),
+        trechos=[trecho(pagina=43)],
+        resposta=resposta_periodo(43),
+    )
+
+    assert resultado.afirmacoes_com_evidencia_valida is None
+    assert resultado.evidencias_com_trechos_validos is None
+    assert resultado.citacoes_derivadas_evidencias is None
+    assert resultado.afirmacoes_obrigatorias_presentes is True
+
+
+def test_relatorio_expoe_motivo_deterministico_da_reprovacao():
+    resultado = avaliar(
+        caso=caso_formula_zoh(),
+        trechos=[trecho(pagina=21)],
+        resposta="Gzoh(s) = 1 - e^(-Ts).",
+    )
+
+    serializado = serializar_resultado(resultado)
+    diagnostico = serializado["diagnostico_semantico"][0]
+    assert diagnostico["estado"] == "reprovado"
+    assert "estrutura matemática íntegra" in diagnostico["motivo_deterministico"]
+
+
+def test_expansao_oppenheim_tem_oito_casos_com_gabarito_completo():
+    casos = json.loads(
+        (Path(__file__).parent / "casos_geracao.json").read_text(encoding="utf-8")
+    )
+    perguntas = {
+        "Por que um sinal constante não possui período fundamental definido?",
+        "Por que o sinal definido como cos(t) para t < 0 e sin(t) para t >= 0 não é periódico?",
+        "Um sistema pode ser linear e variante no tempo ou não linear e invariante no tempo?",
+        "Qual é a condição necessária e suficiente sobre h[n] para estabilidade BIBO de um sistema LTI discreto?",
+        "Por que exponenciais complexos são autofunções de sistemas LTI?",
+        "Qual diferença de periodicidade existe entre DTFT e CTFT?",
+        "Se uma senoide com frequência 5ωs/6 for amostrada com frequência ωs, qual frequência aparece após reconstrução passa-baixas?",
+        "Para H(s) = b/(s-a), com a > 0 e realimentação proporcional G(s)=K, qual condição estabiliza o sistema?",
+    }
+    expandidos = [caso for caso in casos if caso["pergunta"] in perguntas]
+
+    assert len(expandidos) == 8
+    for caso in expandidos:
+        assert caso["afirmacoes_obrigatorias"]
+        assert caso["omissoes_criticas"]
+        assert caso["afirmacoes_proibidas"]
+        assert caso["misturas_proibidas"]
+        assert "resposta_esperada" in caso or "valor_esperado" in caso
+
+
+def test_caso_periodo_discreto_declara_paginas_43_e_242():
+    casos = json.loads(
+        (Path(__file__).parent / "casos_geracao.json").read_text(encoding="utf-8")
+    )
+    caso = next(
+        item
+        for item in casos
+        if item["pergunta"].startswith("Como o livro define o período fundamental")
+    )
+
+    assert caso["paginas_esperadas"] == [43, 242]
+    assert caso["afirmacoes_obrigatorias"][0]["fontes_aceitaveis"][0][
+        "paginas"
+    ] == [43, 242]

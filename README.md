@@ -255,9 +255,12 @@ A **taxa de acerto da recuperação** é a proporção de casos em que pelo meno
 
 ### Avaliar a geração e a sustentação factual
 
-Os casos em `avaliacao/casos_geracao.json` cobrem resposta direta, reformulação,
-pergunta em português sobre PDF inglês, fórmula, ausência de resposta, indução a inventar
-e continuação em página vizinha.
+Os 15 casos em `avaliacao/casos_geracao.json` cobrem resposta direta, reformulação,
+fórmula, ausência de resposta, indução a inventar, continuação em página vizinha e oito
+casos técnicos adicionais verificados diretamente no Oppenheim. A expansão inclui sinal
+constante, descontinuidade não recorrente, independência entre linearidade e invariância,
+estabilidade BIBO, autofunções exponenciais, periodicidade DTFT/CTFT, aliasing e
+estabilização por realimentação.
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.evaluate --geracao
@@ -282,18 +285,40 @@ registradas separadamente e deduplicadas antes da contagem. Os campos antigos
 `arquivo_correto`, `pagina_correta` e `fonte_correta` permanecem somente como aliases
 legados das métricas de recuperação.
 
-Conceitos esperados podem continuar como texto literal ou declarar alternativas em
-`qualquer_de`. Alternativas numéricas especificam `valor`, `unidade` e `tolerancia`;
-vírgula e ponto decimal são normalizados, mas unidade, sinal e ordem de grandeza são
-preservados. Por exemplo, o caso de amostragem aceita `14 rad/s` ou o valor equivalente
-`2,2282 Hz` dentro da tolerância declarada, sem consultar o Qwen para decidir a métrica.
+Conceitos legados podem continuar como texto literal ou declarar alternativas em
+`qualquer_de`. O esquema 2.2 acrescenta `afirmacoes_obrigatorias`,
+`omissoes_criticas`, `afirmacoes_proibidas`, `formulas_esperadas` e
+`misturas_proibidas`. Cada afirmação é avaliada separadamente: os itens de
+`termos_todos` e os modificadores críticos precisam ocorrer na mesma afirmação, e uma
+fonte em `fontes_aceitaveis` só conta quando foi recuperada e citada nessa própria
+afirmação. Assim, palavras dispersas, uma página presente apenas no contexto ou uma
+citação ligada a outro fato não aprovam o requisito. Uma fonte pode declarar várias
+páginas legítimas; no caso do período fundamental discreto, as páginas PDF 43 e 242
+foram confirmadas manualmente e qualquer uma basta.
 
-Valores não aplicáveis ficam como `null` e não entram no denominador. A relação semântica
-entre afirmação, citação e trecho é auditada pelo Qwen e aparece separadamente como
-**métrica auxiliar não independente**. Quando o mesmo `qwen2.5:3b` gera e audita, o
-relatório registra `avaliacao_independente: false`; essa auditoria não substitui gabarito
-ou revisão humana. A execução pode demorar alguns minutos e permanece separada da
-avaliação rápida de recuperação na interface.
+Alternativas numéricas especificam `valor`, `unidade` e `tolerancia`; vírgula e ponto
+decimal são normalizados, mas unidade, sinal e ordem de grandeza são preservados. Por
+exemplo, o caso de amostragem aceita `14 rad/s` ou `2,2282 Hz` dentro da tolerância
+declarada. O normalizador de fórmulas é conservador: trata espaços, sinais Unicode,
+multiplicação explícita, decimais, LaTeX simples e parênteses redundantes, sem realizar
+álgebra simbólica. Por isso `(1-e^(-Ts))/s` e `\frac{1-e^{-Ts}}{s}` são aceitas para o
+ZOH, enquanto a perda do denominador, de `s` no expoente ou do sinal negativo é
+reprovada.
+
+As métricas determinísticas novas são `afirmacoes_obrigatorias_presentes`,
+`afirmacoes_proibidas_ausentes`, `fontes_aceitaveis_citadas`, `formulas_integras`,
+`omissoes_criticas`, `misturas_proibidas_ausentes`,
+`requisitos_semanticos_aprovados` e `requisitos_semanticos_aplicaveis`. Cada caso
+serializa um diagnóstico por requisito com estado, alternativa encontrada, termos
+ausentes, fonte publicada usada, fórmula encontrada e motivo determinístico da falha.
+
+Valores não aplicáveis ficam como `null` e não entram no denominador. As decisões do
+gabarito 2.2 são inteiramente determinísticas e não chamam o Ollama. A auditoria factual
+do Qwen continua separada como **métrica auxiliar não independente** e não decide a
+aprovação determinística. Quando o mesmo `qwen2.5:3b` gera e audita, o relatório registra
+`avaliacao_independente: false`; isso não constitui auditoria factual independente nem
+substitui o gabarito ou revisão humana. A execução pode demorar alguns minutos e
+permanece separada da avaliação rápida de recuperação na interface.
 
 No modo Fundamentado, o relatório também registra deterministicamente os rótulos `Tn`,
 IDs reais do ChromaDB, evidências `En`, vínculos afirmação→evidência, páginas derivadas,
@@ -305,9 +330,9 @@ ficam como não aplicáveis; eventuais
 vínculos da auditoria são identificados como reconstruídos e não como IDs usados na
 geração.
 
-Os relatórios novos usam o esquema **2.1**, uma extensão aditiva do 2.0. Relatórios
-históricos continuam sendo carregados sem preencher campos ausentes como reprovações e
-nenhum JSON anterior é reescrito.
+Os relatórios novos usam o esquema **2.2**, uma extensão aditiva do 2.1. Relatórios 2.0
+e 2.1 continuam sendo carregados e serializados sem preencher campos ausentes como
+reprovações, e nenhum JSON anterior é reescrito.
 
 ## Interface local
 

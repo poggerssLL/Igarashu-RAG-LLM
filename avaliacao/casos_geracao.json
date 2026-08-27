@@ -6,11 +6,62 @@
     "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
     "paginas_esperadas": [42, 43],
     "conceitos_esperados": ["periódico", "período"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "definicao_sinal_periodico",
+        "qualquer_de": [
+          {
+            "termos_todos": [
+              {"qualquer_de": ["sinal periódico", "sinais periódicos"]},
+              "período"
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [42, 43]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "repeticao_apos_deslocamento",
+        "afirmacao_id": "definicao_sinal_periodico",
+        "termos_todos": [
+          {
+            "qualquer_de": [
+              "se repete",
+              "iguais após",
+              "permanece inalterado",
+              "não muda"
+            ]
+          }
+        ]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "generalizacao_exponencial",
+        "qualquer_de": [
+          "sinais periódicos são exponenciais complexos",
+          "sinais periódicos são complexos exponenciais",
+          "todo sinal periódico é exponencial complexo"
+        ]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "Um sinal periódico repete-se ou permanece inalterado após um deslocamento igual a um período.",
     "idioma": "Português",
     "nivel_detalhe": "Curto",
     "espera_recusa": false,
     "incluir_vizinhas": true,
-    "observacao": "Definição curta, sem necessidade de alongar."
+    "observacao": "Definição curta; rejeita a generalização de que todo sinal periódico seria exponencial complexo."
   },
   {
     "tipo": "pergunta reformulada",
@@ -19,24 +70,119 @@
     "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
     "paginas_esperadas": [42, 43],
     "conceitos_esperados": ["x(t)", "t"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "igualdade_periodicidade_continua",
+        "qualquer_de": [
+          {"termos_todos": ["x(t)", "x(t + T)"]},
+          {"termos_todos": ["x(t)", "x(t+T)"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [42, 43]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "igualdade_para_todo_t",
+        "afirmacao_id": "igualdade_periodicidade_continua",
+        "termos_todos": [
+          {
+            "qualquer_de": [
+              "para todo t",
+              "para qualquer t",
+              "para todos os valores de t"
+            ]
+          }
+        ]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "igualdade_apenas_alguns_instantes",
+        "qualquer_de": [
+          "vale apenas para alguns instantes",
+          "não precisa valer para todo t"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "formula_periodicidade_continua",
+        "qualquer_de": ["x(t)=x(t+T)", "x(t+T)=x(t)"],
+        "variaveis_obrigatorias": ["x", "t", "T"]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "x(t) = x(t + T), para todo t, com T positivo.",
     "idioma": "Português",
     "nivel_detalhe": "Explicado",
     "espera_recusa": false,
     "incluir_vizinhas": true,
-    "observacao": "Mesma definição sem repetir a terminologia exata do livro."
+    "observacao": "Exige a igualdade e o quantificador para todo t na mesma afirmação."
   },
   {
     "tipo": "português sobre PDF inglês",
     "pergunta": "Como o livro define o período fundamental de um sinal discreto periódico?",
     "disciplina": "Sinais e Sistemas",
     "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
-    "paginas_esperadas": [43],
+    "paginas_esperadas": [43, 242],
     "conceitos_esperados": ["período fundamental"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "definicao_periodo_fundamental_discreto",
+        "qualquer_de": [
+          {
+            "termos_todos": [
+              "período fundamental",
+              "menor",
+              "positivo",
+              "N"
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [43, 242]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "periodo_discreto_inteiro",
+        "afirmacao_id": "definicao_periodo_fundamental_discreto",
+        "termos_todos": ["inteiro"]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "generalizacao_exponencial",
+        "qualquer_de": [
+          "sinais periódicos são exponenciais complexos",
+          "sinais periódicos são complexos exponenciais",
+          "todo sinal periódico é exponencial complexo"
+        ]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "O período fundamental N0 é o menor inteiro positivo N para o qual x[n] = x[n + N].",
     "idioma": "Português",
     "nivel_detalhe": "Explicado",
     "espera_recusa": false,
     "incluir_vizinhas": true,
-    "observacao": "A resposta existe somente no material em inglês."
+    "observacao": "As páginas PDF 43 e 242 foram verificadas manualmente; ambas contêm a definição e o modificador inteiro é obrigatório."
   },
   {
     "tipo": "fórmula",
@@ -45,11 +191,58 @@
     "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
     "paginas_esperadas": [21],
     "conceitos_esperados": ["gzoh"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "identificacao_funcao_zoh",
+        "qualquer_de": [
+          {"termos_todos": ["função de transferência", "retentor de ordem zero"]},
+          {"termos_todos": ["Gzoh", "retentor de ordem zero"]},
+          {"termos_todos": ["G_zoh", "retentor de ordem zero"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+            "paginas": [21]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "identifica_retencao_ordem_zero",
+        "afirmacao_id": "identificacao_funcao_zoh",
+        "termos_todos": ["retentor de ordem zero"]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "zoh_sem_divisao",
+        "qualquer_de": [
+          "a função do ZOH não possui denominador",
+          "o denominador s pode ser omitido"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "formula_funcao_zoh",
+        "qualquer_de": [
+          "(1-e^(-Ts))/s",
+          "\\frac{1-e^{-Ts}}{s}"
+        ],
+        "variaveis_obrigatorias": ["T", "s"]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "A função de transferência do retentor de ordem zero é Gzoh(s) = (1 - e^(-Ts)) / s.",
     "idioma": "Português",
     "nivel_detalhe": "Explicado",
     "espera_recusa": false,
     "incluir_vizinhas": true,
-    "observacao": "A fórmula só pode aparecer se extraída da evidência."
+    "observacao": "A página foi verificada visualmente; a validação rejeita a fórmula corrompida pelo OCR mesmo quando ela reaparece na evidência."
   },
   {
     "tipo": "sem resposta",
@@ -58,11 +251,17 @@
     "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
     "paginas_esperadas": [],
     "conceitos_esperados": [],
+    "afirmacoes_obrigatorias": [],
+    "omissoes_criticas": [],
+    "afirmacoes_proibidas": [],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [],
+    "resposta_esperada": "Recusa explícita por ausência da informação no material.",
     "idioma": "Português",
     "nivel_detalhe": "Curto",
     "espera_recusa": true,
     "incluir_vizinhas": false,
-    "observacao": "Informação ausente deve produzir recusa explícita."
+    "observacao": "Informação ausente deve produzir recusa explícita; métricas semânticas ficam N/A."
   },
   {
     "tipo": "indução a inventar",
@@ -71,11 +270,17 @@
     "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
     "paginas_esperadas": [],
     "conceitos_esperados": [],
+    "afirmacoes_obrigatorias": [],
+    "omissoes_criticas": [],
+    "afirmacoes_proibidas": [],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [],
+    "resposta_esperada": "Recusa explícita à premissa não sustentada.",
     "idioma": "Português",
     "nivel_detalhe": "Explicado",
     "espera_recusa": true,
     "incluir_vizinhas": false,
-    "observacao": "A premissa não deve ser aceita sem evidência."
+    "observacao": "A premissa não deve ser aceita sem evidência; métricas semânticas ficam N/A."
   },
   {
     "tipo": "páginas vizinhas",
@@ -88,18 +293,619 @@
         "id": "frequencia_minima",
         "qualquer_de": [
           "14 rad/s",
+          {"valor": 2.2282, "unidade": "Hz", "tolerancia": 0.0005}
+        ]
+      }
+    ],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "valor_frequencia_minima",
+        "qualquer_de": [
+          {"termos_todos": ["frequência mínima", "14 rad/s"]},
           {
-            "valor": 2.2282,
-            "unidade": "Hz",
-            "tolerancia": 0.0005
+            "termos_todos": [
+              "frequência mínima",
+              {"valor": 2.2282, "unidade": "Hz", "tolerancia": 0.0005}
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Aula 8 - Sinais e Sistemas - Amostragem e Reconstrução.pdf",
+            "paginas": [18, 19]
           }
         ]
       }
     ],
+    "omissoes_criticas": [
+      {
+        "id": "qualifica_como_frequencia_minima",
+        "afirmacao_id": "valor_frequencia_minima",
+        "termos_todos": ["mínima"]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "confusao_maior_componente",
+        "qualquer_de": [
+          "a frequência mínima é 7 rad/s",
+          "a frequência mínima é 7 Hz"
+        ]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "valor_esperado": [
+      {"valor": 14, "unidade": "rad/s", "tolerancia": 0},
+      {"valor": 2.2282, "unidade": "Hz", "tolerancia": 0.0005}
+    ],
+    "resposta_esperada": "A frequência mínima de amostragem é 14 rad/s, equivalente a aproximadamente 2,2282 Hz.",
     "idioma": "Português",
     "nivel_detalhe": "Passo a passo",
     "espera_recusa": false,
     "incluir_vizinhas": true,
-    "observacao": "O enunciado está na página 18 e a resolução na página 19."
+    "observacao": "O enunciado está na página 18 e a resolução na página 19; unidade e tolerância permanecem determinísticas."
+  },
+  {
+    "tipo": "omissão crítica",
+    "pergunta": "Por que um sinal constante não possui período fundamental definido?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [43],
+    "conceitos_esperados": ["constante", "período fundamental"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "constante_periodico_para_qualquer_periodo",
+        "qualquer_de": [
+          {"termos_todos": ["sinal constante", "periódico"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [43]
+          }
+        ]
+      },
+      {
+        "id": "fundamental_indefinido_sem_minimo",
+        "qualquer_de": [
+          {"termos_todos": ["período fundamental", "indefinido"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [43]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "qualquer_escolha_de_periodo",
+        "afirmacao_id": "constante_periodico_para_qualquer_periodo",
+        "termos_todos": [
+          {"qualquer_de": ["qualquer T", "qualquer período", "qualquer escolha de T", "todo T"]}
+        ]
+      },
+      {
+        "id": "inexistencia_menor_positivo",
+        "afirmacao_id": "fundamental_indefinido_sem_minimo",
+        "termos_todos": ["não", "menor", "positivo"]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "constante_aperiodico",
+        "qualquer_de": ["sinal constante é aperiódico"]
+      },
+      {
+        "id": "periodo_fundamental_zero",
+        "qualquer_de": ["período fundamental é zero"]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "Um sinal constante é periódico para qualquer escolha de T; como não existe menor valor positivo, o período fundamental é indefinido.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 43; distingue periodicidade de existência de período fundamental."
+  },
+  {
+    "tipo": "contraexemplo de periodicidade",
+    "pergunta": "Por que o sinal definido como cos(t) para t < 0 e sin(t) para t >= 0 não é periódico?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [43],
+    "conceitos_esperados": ["descontinuidade", "não periódico"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "descontinuidade_nao_recorrente",
+        "qualquer_de": [
+          {
+            "termos_todos": [
+              "descontinuidade",
+              "origem",
+              {"qualquer_de": ["não periódico", "não é periódico"]}
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [43]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "descontinuidade_nao_se_repete",
+        "afirmacao_id": "descontinuidade_nao_recorrente",
+        "termos_todos": [
+          {
+            "qualquer_de": [
+              "não se repete",
+              "não volta a ocorrer",
+              "não reaparece"
+            ]
+          }
+        ]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "periodo_global_dois_pi",
+        "qualquer_de": [
+          "o sinal é periódico com período 2π",
+          "o sinal tem período 2π"
+        ]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "Embora seno e cosseno se repitam, a descontinuidade na origem não reaparece; por isso o sinal completo não é periódico.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 43; evita concluir periodicidade apenas pelas duas expressões trigonométricas."
+  },
+  {
+    "tipo": "independência de propriedades",
+    "pergunta": "Um sistema pode ser linear e variante no tempo ou não linear e invariante no tempo?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [84],
+    "conceitos_esperados": ["linear", "invariante no tempo"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "linear_sem_invariancia",
+        "qualquer_de": [
+          "linear e variante no tempo",
+          "linear sem ser invariante no tempo",
+          "sistemas lineares variantes no tempo"
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [84]
+          }
+        ]
+      },
+      {
+        "id": "invariante_sem_linearidade",
+        "qualquer_de": [
+          "não linear e invariante no tempo",
+          "invariante no tempo sem ser linear",
+          "sistemas não lineares invariantes no tempo"
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [84]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "possibilidade_linear_variante",
+        "afirmacao_id": "linear_sem_invariancia",
+        "termos_todos": [{"qualquer_de": ["pode", "é possível", "há"]}]
+      },
+      {
+        "id": "possibilidade_nao_linear_invariante",
+        "afirmacao_id": "invariante_sem_linearidade",
+        "termos_todos": [{"qualquer_de": ["pode", "é possível", "há"]}]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "linear_implica_invariancia",
+        "qualquer_de": ["todo sistema linear é invariante no tempo"]
+      },
+      {
+        "id": "invariante_implica_linear",
+        "qualquer_de": ["todo sistema invariante no tempo é linear"]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "Sim. Linearidade e invariância no tempo são propriedades independentes: há sistemas lineares variantes no tempo e sistemas não lineares invariantes no tempo.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 84; exige as duas combinações permitidas."
+  },
+  {
+    "tipo": "condição necessária e suficiente",
+    "pergunta": "Qual é a condição necessária e suficiente sobre h[n] para estabilidade BIBO de um sistema LTI discreto?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [144],
+    "conceitos_esperados": ["h[n]", "absolutamente somável"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "impulso_absolutamente_somavel",
+        "qualquer_de": [
+          {
+            "termos_todos": [
+              "h[n]",
+              {
+                "qualquer_de": [
+                  "absolutamente somável",
+                  "somável em valor absoluto"
+                ]
+              }
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [144]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "necessaria_e_suficiente",
+        "afirmacao_id": "impulso_absolutamente_somavel",
+        "termos_todos": [
+          {
+            "qualquer_de": [
+              "necessária e suficiente",
+              "necessário e suficiente",
+              "equivalente"
+            ]
+          }
+        ]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "somente_suficiente",
+        "qualquer_de": [
+          "é apenas uma condição suficiente",
+          "não é uma condição necessária"
+        ]
+      },
+      {
+        "id": "soma_divergente_estavel",
+        "qualquer_de": [
+          "pode ser estável com soma absoluta infinita"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "soma_absoluta_finita",
+        "qualquer_de": [
+          "\\sum_{k=-\\infty}^{\\infty}|h[k]|<\\infty",
+          "sum_(k=-infinity)^(infinity)|h[k]|<infinity",
+          "sum|h[k]|<infinity"
+        ],
+        "variaveis_obrigatorias": ["h", "k"]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "A resposta ao impulso h[n] deve ser absolutamente somável: sum |h[k]| < infinity; essa condição é necessária e suficiente.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 144; não aceita apresentar a somabilidade absoluta apenas como suficiente."
+  },
+  {
+    "tipo": "autofunção LTI",
+    "pergunta": "Por que exponenciais complexos são autofunções de sistemas LTI?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [213],
+    "conceitos_esperados": ["exponencial complexo", "amplitude"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "saida_preserva_exponencial",
+        "qualquer_de": [
+          {
+            "termos_todos": [
+              "sistema LTI",
+              {"qualquer_de": ["exponencial complexo", "exponencial complexa"]},
+              {"qualquer_de": ["mesmo exponencial", "mesma exponencial"]}
+            ]
+          },
+          {
+            "termos_todos": [
+              "sistema LTI",
+              {"qualquer_de": ["exponencial complexo", "exponencial complexa"]},
+              "mesma forma"
+            ]
+          }
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [213]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "somente_fator_de_amplitude",
+        "afirmacao_id": "saida_preserva_exponencial",
+        "termos_todos": [
+          {
+            "qualquer_de": [
+              "mudança de amplitude",
+              "fator de amplitude",
+              "multiplicado por H",
+              "multiplicada por H"
+            ]
+          }
+        ]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "todo_periodico_exponencial",
+        "qualquer_de": [
+          "todo sinal periódico é exponencial complexo",
+          "sinais periódicos são complexos exponenciais",
+          "sinais periódicos são exponenciais complexos"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "mapeamento_exponencial_lti",
+        "qualquer_de": [
+          "H(s)e^(st)",
+          "H(z)z^n",
+          "H(s)e^{st}",
+          "H(z)z^{n}"
+        ]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "A resposta de um sistema LTI a uma exponencial complexa é a mesma exponencial multiplicada por H(s), isto é, e^(st) produz H(s)e^(st) e muda apenas o fator de amplitude.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 213; exige preservação da forma exponencial, sem generalizar todos os sinais periódicos."
+  },
+  {
+    "tipo": "comparação de transformadas",
+    "pergunta": "Qual diferença de periodicidade existe entre DTFT e CTFT?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [404],
+    "conceitos_esperados": ["DTFT", "CTFT"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "dtft_periodica",
+        "qualquer_de": [
+          {"termos_todos": ["DTFT", "periódica"]},
+          {"termos_todos": ["transformada de Fourier de tempo discreto", "periódica"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [404]
+          }
+        ]
+      },
+      {
+        "id": "ctft_nao_periodica_em_geral",
+        "qualquer_de": [
+          {"termos_todos": ["CTFT", {"qualquer_de": ["não periódica", "não é periódica"]}]},
+          {"termos_todos": ["transformada de Fourier de tempo contínuo", {"qualquer_de": ["não periódica", "não é periódica"]}]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [404]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "periodo_dois_pi_dtft",
+        "afirmacao_id": "dtft_periodica",
+        "termos_todos": [{"qualquer_de": ["2π", "2 pi", "dois pi"]}]
+      },
+      {
+        "id": "qualificador_ctft_em_geral",
+        "afirmacao_id": "ctft_nao_periodica_em_geral",
+        "termos_todos": [{"qualquer_de": ["em geral", "geralmente"]}]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "ctft_sempre_periodica",
+        "qualquer_de": ["a CTFT é sempre periódica"]
+      },
+      {
+        "id": "dtft_aperiodica",
+        "qualquer_de": ["a DTFT não é periódica"]
+      }
+    ],
+    "formulas_esperadas": [],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "resposta_esperada": "A DTFT é sempre periódica em frequência, com período 2π; a CTFT, em geral, não é periódica.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 404; preserva o qualificador em geral para a CTFT."
+  },
+  {
+    "tipo": "aliasing",
+    "pergunta": "Se uma senoide com frequência 5ωs/6 for amostrada com frequência ωs, qual frequência aparece após reconstrução passa-baixas?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [559],
+    "conceitos_esperados": ["ωs/6"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "frequencia_reconstruida_alias",
+        "qualquer_de": [
+          {"termos_todos": ["reconstrução", "ωs/6"]},
+          {"termos_todos": ["reconstruída", "omega_s/6"]},
+          {"termos_todos": ["saída", "ωs/6"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [559]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "resultado_um_sexto",
+        "afirmacao_id": "frequencia_reconstruida_alias",
+        "termos_todos": [{"qualquer_de": ["ωs/6", "omega_s/6", "um sexto"]}]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "mantem_frequencia_original",
+        "qualquer_de": [
+          "a frequência reconstruída é 5ωs/6",
+          "aparece 5ωs/6 após a reconstrução"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "valor_frequencia_alias",
+        "qualquer_de": ["ωs/6", "\\omega_s/6", "omega_s/6"]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "valor_esperado": "ωs/6",
+    "resposta_esperada": "Após a reconstrução passa-baixas, a frequência de saída é ωs/6 devido ao aliasing.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 559; o alias de 5ωs/6 após passa-baixas é ωs - 5ωs/6 = ωs/6."
+  },
+  {
+    "tipo": "estabilização por realimentação",
+    "pergunta": "Para H(s) = b/(s-a), com a > 0 e realimentação proporcional G(s)=K, qual condição estabiliza o sistema?",
+    "disciplina": "Sinais e Sistemas",
+    "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+    "paginas_esperadas": [854],
+    "conceitos_esperados": ["Kb > a"],
+    "afirmacoes_obrigatorias": [
+      {
+        "id": "condicao_estabilidade_realimentada",
+        "qualquer_de": [
+          {"termos_todos": ["estável", "Kb > a"]},
+          {"termos_todos": ["estabiliza", "Kb > a"]},
+          {"termos_todos": ["estável", "Kb maior que a"]}
+        ],
+        "fontes_aceitaveis": [
+          {
+            "arquivo": "Sinais e Sistemas/Signals_and_Systems_2nd_Edition_by_Oppen.pdf",
+            "paginas": [854]
+          }
+        ]
+      }
+    ],
+    "omissoes_criticas": [
+      {
+        "id": "desigualdade_estrita",
+        "afirmacao_id": "condicao_estabilidade_realimentada",
+        "termos_todos": [{"qualquer_de": [">", "maior que"]}]
+      }
+    ],
+    "afirmacoes_proibidas": [
+      {
+        "id": "desigualdade_invertida",
+        "qualquer_de": [
+          "o sistema estabiliza se Kb < a",
+          "o sistema é estável quando Kb < a"
+        ]
+      },
+      {
+        "id": "igualdade_estabiliza",
+        "qualquer_de": [
+          "o sistema estabiliza se Kb = a",
+          "Kb = a é suficiente para estabilidade"
+        ]
+      }
+    ],
+    "formulas_esperadas": [
+      {
+        "id": "condicao_kb_maior_a",
+        "qualquer_de": ["Kb>a", "K b > a"],
+        "variaveis_obrigatorias": ["K", "b", "a"]
+      }
+    ],
+    "misturas_proibidas": [
+      {"id": "mistura_tempo_shift", "qualquer_de": ["tempo shift"]},
+      {"id": "mistura_periodic_sinal", "qualquer_de": ["periodic sinal"]}
+    ],
+    "valor_esperado": "Kb > a",
+    "resposta_esperada": "O sistema em malha fechada é estável quando Kb > a.",
+    "idioma": "Português",
+    "nivel_detalhe": "Explicado",
+    "espera_recusa": false,
+    "incluir_vizinhas": true,
+    "observacao": "Verificado na página PDF 854; a desigualdade é estrita porque o polo a - Kb deve ficar no semiplano esquerdo."
   }
 ]

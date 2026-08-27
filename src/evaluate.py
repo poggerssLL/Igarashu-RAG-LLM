@@ -291,8 +291,18 @@ def main() -> int:
                     f"conceitos={item.conceitos_presentes} "
                     f"citação_formal={item.citacao_formal_valida} "
                     f"citação_recuperada={item.citacao_recuperada} idioma={item.idioma_correto} "
-                    f"recusa={item.recusa_correta} não_sustentadas_publicadas={item.nao_sustentadas_publicadas}"
+                    f"recusa={item.recusa_correta} "
+                    f"afirmações_obrigatórias={item.afirmacoes_obrigatorias_presentes} "
+                    f"fontes_por_afirmação={item.fontes_aceitaveis_citadas} "
+                    f"fórmulas={item.formulas_integras} "
+                    f"omissões_críticas={item.omissoes_criticas}"
                 )
+                for diagnostico in item.diagnosticos_semanticos:
+                    if diagnostico.estado == "reprovado":
+                        print(
+                            f"   - {diagnostico.id}: "
+                            f"{diagnostico.motivo_deterministico}"
+                        )
             return 0
         resultados = executar_avaliacao(
             disciplina,
